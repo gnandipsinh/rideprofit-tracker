@@ -14,7 +14,124 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      app_settings: {
+        Row: {
+          app_name: string
+          created_at: string
+          currency: string
+          default_vehicle_id: string | null
+          id: string
+          updated_at: string
+        }
+        Insert: {
+          app_name?: string
+          created_at?: string
+          currency?: string
+          default_vehicle_id?: string | null
+          id?: string
+          updated_at?: string
+        }
+        Update: {
+          app_name?: string
+          created_at?: string
+          currency?: string
+          default_vehicle_id?: string | null
+          id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "app_settings_default_vehicle_id_fkey"
+            columns: ["default_vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "vehicles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      trips: {
+        Row: {
+          created_at: string
+          date: string
+          diesel: number
+          driver_payment: number
+          emi_share: number
+          id: string
+          income: number
+          notes: string
+          other_expense_items: Json
+          updated_at: string
+          vehicle_id: string
+        }
+        Insert: {
+          created_at?: string
+          date: string
+          diesel?: number
+          driver_payment?: number
+          emi_share?: number
+          id?: string
+          income?: number
+          notes?: string
+          other_expense_items?: Json
+          updated_at?: string
+          vehicle_id: string
+        }
+        Update: {
+          created_at?: string
+          date?: string
+          diesel?: number
+          driver_payment?: number
+          emi_share?: number
+          id?: string
+          income?: number
+          notes?: string
+          other_expense_items?: Json
+          updated_at?: string
+          vehicle_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "trips_vehicle_id_fkey"
+            columns: ["vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "vehicles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      vehicles: {
+        Row: {
+          created_at: string
+          id: string
+          model: string
+          name: string
+          notes: string
+          type: string
+          updated_at: string
+          vehicle_number: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          model?: string
+          name: string
+          notes?: string
+          type?: string
+          updated_at?: string
+          vehicle_number?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          model?: string
+          name?: string
+          notes?: string
+          type?: string
+          updated_at?: string
+          vehicle_number?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
