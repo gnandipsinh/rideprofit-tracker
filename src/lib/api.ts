@@ -9,7 +9,7 @@ import type {
 
 const STORAGE_KEY = "vcs.apiBaseUrl";
 
-const ENV_BASE_URL = ((import.meta.env.VITE_API_URL as string | undefined) ?? "").trim();
+const ENV_BASE_URL = ((import.meta.env['VITE_API_URL'] as string | undefined) ?? "").trim();
 export const DEFAULT_API_BASE_URL = ENV_BASE_URL || "http://localhost:4000/api";
 
 /** Backend location is configuration (not application data), so it lives in the browser. */

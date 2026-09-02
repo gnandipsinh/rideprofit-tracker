@@ -63,7 +63,7 @@ function useInvalidateAll() {
 export function useSaveVehicle() {
   const invalidate = useInvalidateAll();
   return useMutation({
-    mutationFn: ({ id, payload }: { id?: string; payload: VehiclePayload }) =>
+    mutationFn: ({ id, payload }: { id?: string | undefined; payload: VehiclePayload }) =>
       id ? api.updateVehicle(id, payload) : api.createVehicle(payload),
     onSuccess: (_data, vars) => {
       invalidate();
@@ -88,7 +88,7 @@ export function useDeleteVehicle() {
 export function useSaveTrip() {
   const invalidate = useInvalidateAll();
   return useMutation({
-    mutationFn: ({ id, payload }: { id?: string; payload: TripPayload }) =>
+    mutationFn: ({ id, payload }: { id?: string | undefined; payload: TripPayload }) =>
       id ? api.updateTrip(id, payload) : api.createTrip(payload),
     onSuccess: (_data, vars) => {
       invalidate();

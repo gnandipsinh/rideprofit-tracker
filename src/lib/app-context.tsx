@@ -42,7 +42,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         : settings?.defaultVehicleId && ids.includes(settings.defaultVehicleId)
           ? settings.defaultVehicleId
           : ids[0];
-    setSelected(next);
+    setSelected(next ?? "");
   }, [vehicles, settings?.defaultVehicleId, selectedVehicleId]);
 
   const setSelectedVehicleId = (id: string) => {
