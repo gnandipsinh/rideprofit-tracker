@@ -56,23 +56,32 @@ export function AppShell({ children, showAddTrip = true }: { children: ReactNode
         <div className="h-px w-full gold-rule opacity-30" />
       </header>
 
-      {offline ? (
+      {offline && !dismissed ? (
         <div className="mx-auto max-w-5xl px-4 pt-4">
-          <div className="flex items-start gap-3 rounded-2xl border border-destructive/40 bg-destructive/10 p-3">
-            <WifiOff className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+          <div className="flex items-start gap-3 rounded-2xl border border-border/70 bg-secondary/40 p-3">
+            <PlugZap className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
             <div className="min-w-0 text-xs text-foreground/90">
-              <p className="font-semibold">API server not reachable</p>
+              <p className="font-semibold">Backend not connected yet</p>
               <p className="mt-0.5 text-muted-foreground">
-                Start the Express server in <span className="font-mono">/server</span> and set its URL in Settings →
-                Backend connection.
+                Add your deployed Express API URL in Settings → Backend Connection, or run the server in{" "}
+                <span className="font-mono">/server</span> with <span className="font-mono">npm run dev</span>.
               </p>
               <Link to="/settings" className="mt-1.5 inline-block font-semibold text-primary underline">
-                Open Settings
+                Configure backend
               </Link>
             </div>
+            <button
+              type="button"
+              onClick={() => setDismissed(true)}
+              aria-label="Dismiss"
+              className="ml-auto shrink-0 rounded-md p-1 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </button>
           </div>
         </div>
       ) : null}
+
 
       <main className="mx-auto max-w-5xl px-4 py-4">{children}</main>
 
