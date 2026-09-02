@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
-import { LayoutDashboard, Truck, Route as RouteIcon, FileText, Settings as SettingsIcon, Plus, WifiOff } from "lucide-react";
+import { LayoutDashboard, Truck, Route as RouteIcon, FileText, Settings as SettingsIcon, Plus, PlugZap, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TripFormDialog } from "@/components/TripFormDialog";
 import { useApp } from "@/lib/app-context";
@@ -20,6 +20,7 @@ export function AppShell({ children, showAddTrip = true }: { children: ReactNode
   const health = useHealth();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const [tripOpen, setTripOpen] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
 
   const offline = health.isError;
 
