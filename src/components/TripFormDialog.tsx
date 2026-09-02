@@ -98,10 +98,19 @@ export function TripFormDialog({ open, onOpenChange, trip }: TripFormDialogProps
     }));
 
   const submit = () => {
-    if (!form.vehicleId) return toast.error("Please select a vehicle");
-    if (!form.date) return toast.error("Please choose a date");
+    if (!form.vehicleId) {
+      toast.error("Please select a vehicle");
+      return;
+    }
+    if (!form.date) {
+      toast.error("Please choose a date");
+      return;
+    }
     const invalid = form.otherExpenseItems.find((i) => !i.name.trim());
-    if (invalid) return toast.error("Every other expense needs a name");
+    if (invalid) {
+      toast.error("Every other expense needs a name");
+      return;
+    }
 
     saveTrip.mutate(
       {

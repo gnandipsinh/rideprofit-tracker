@@ -72,7 +72,10 @@ function VehiclesPage() {
   };
 
   const submit = () => {
-    if (!form.name.trim()) return toast.error("Vehicle name is required");
+    if (!form.name.trim()) {
+      toast.error("Vehicle name is required");
+      return;
+    }
     save.mutate(
       { id: editing?._id, payload: { ...form, name: form.name.trim() } },
       { onSuccess: () => setOpen(false) },

@@ -95,13 +95,13 @@ function ReportsPage() {
           <Skeleton className="h-64 w-full rounded-2xl" />
         ) : vehicles.length === 0 ? (
           <EmptyState
-            icon={FileText}
+            icon={<FileText className="h-6 w-6" />}
             title="No vehicles yet"
             description="Add a vehicle and record trips to generate reports."
           />
         ) : !report || report.rows.length === 0 ? (
           <EmptyState
-            icon={FileText}
+            icon={<FileText className="h-6 w-6" />}
             title="No trips in this period"
             description="Change the date range or add trips to see a report."
           />
