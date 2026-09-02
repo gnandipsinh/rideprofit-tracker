@@ -40,6 +40,8 @@ export const Route = createFileRoute("/settings")({
 function SettingsPage() {
   const { settings, vehicles } = useApp();
   const save = useSaveSettings();
+  const health = useHealth();
+
 
   const [appName, setAppName] = useState("");
   const [currency, setCurrency] = useState("INR");
