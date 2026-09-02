@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { Save, Server } from "lucide-react";
 import { toast } from "sonner";
+import { useHealth } from "@/lib/queries";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -150,7 +151,7 @@ function SettingsPage() {
             value={apiUrl}
             onChange={(e) => setApiUrl(e.target.value)}
             className="h-12 rounded-xl font-mono text-sm"
-            placeholder="https://your-api.example.com/api"
+            placeholder="https://your-backend-url.com/api"
             inputMode="url"
             autoCapitalize="none"
             spellCheck={false}
@@ -158,6 +159,16 @@ function SettingsPage() {
           <Button onClick={saveBackend} variant="secondary" className="h-12 w-full rounded-xl font-semibold">
             Save backend URL
           </Button>
+          <p className="text-xs font-semibold">
+            Status:{" "}
+            {health.isLoading ? (
+              <span className="text-muted-foreground">checking…</span>
+            ) : health.isError ? (
+              <span className="text-muted-foreground">not connected — enter your deployed API URL above</span>
+            ) : (
+              <span className="text-primary">connected</span>
+            )}
+          </p>
         </section>
       </div>
     </AppShell>
