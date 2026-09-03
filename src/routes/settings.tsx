@@ -38,13 +38,10 @@ export const Route = createFileRoute("/settings")({
 function SettingsPage() {
   const { settings, vehicles } = useApp();
   const save = useSaveSettings();
-  const health = useHealth();
-
 
   const [appName, setAppName] = useState("");
   const [currency, setCurrency] = useState("INR");
   const [defaultVehicleId, setDefaultVehicleId] = useState(NO_DEFAULT);
-  const [apiUrl, setApiUrl] = useState("");
 
   useEffect(() => {
     if (!settings) return;
@@ -52,10 +49,6 @@ function SettingsPage() {
     setCurrency(settings.currency || "INR");
     setDefaultVehicleId(settings.defaultVehicleId ?? NO_DEFAULT);
   }, [settings]);
-
-  useEffect(() => {
-    setApiUrl(getApiBaseUrl());
-  }, []);
 
   const submit = () => {
     if (!appName.trim()) {
@@ -69,11 +62,6 @@ function SettingsPage() {
     });
   };
 
-  const saveBackend = () => {
-    setApiBaseUrl(apiUrl);
-    toast.success("Backend URL saved");
-    window.location.reload();
-  };
 
   return (
     <AppShell showAddTrip={false}>
