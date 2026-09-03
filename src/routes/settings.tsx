@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { Save, Server } from "lucide-react";
+import { Save } from "lucide-react";
 import { toast } from "sonner";
-import { useHealth } from "@/lib/queries";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,7 +9,6 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useApp } from "@/lib/app-context";
 import { useSaveSettings } from "@/lib/queries";
-import { DEFAULT_API_BASE_URL, getApiBaseUrl, setApiBaseUrl } from "@/lib/api";
 
 const CURRENCIES = [
   { value: "INR", label: "INR — Indian Rupee (₹)" },
