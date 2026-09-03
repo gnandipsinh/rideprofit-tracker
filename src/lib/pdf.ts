@@ -1,76 +1,124 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
-import { formatDateShort, formatIndianNumber } from "./format";
+import { formatDate, formatDateShort, formatMoney } from "./format";
+import { NOTO_SANS_BOLD_BASE64, NOTO_SANS_REGULAR_BASE64 } from "./report-font";
 import type { ReportPayload } from "./types";
 
+const FONT = "NotoSans";
+
+/** A4 portrait, in points: 595.28 x 841.89 */
+const MARGIN = 34;
+
+function registerFont(doc: jsPDF): void {
+  doc.addFileToVFS("NotoSans-Regular.ttf", NOTO_SANS_REGULAR_BASE64);
+  doc.addFont("NotoSans-Regular.ttf", FONT, "normal");
+  doc.addFileToVFS("NotoSans-Bold.ttf", NOTO_SANS_BOLD_BASE64);
+  doc.addFont("NotoSans-Bold.ttf", FONT, "bold");
+  doc.setFont(FONT, "normal");
+}
+
+function slug(value: string): string {
+  return value.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "vehicle";
+}
+
 /**
- * Professional multi-page PDF for the exact rows shown in the report table.
- * jsPDF core fonts have no ₹ glyph, so amounts are prefixed with "Rs." in the
- * document while the on-screen table keeps the ₹ symbol.
+ * Real, selectable-text A4 portrait PDF of exactly the filtered rows shown on
+ * the Reports screen. No calculations happen here — values come from the report
+ * payload as-is.
  */
-export function downloadReportPdf(report: ReportPayload, appName: string): void {
-  const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+export function downloadReportPdf(report: ReportPayload, appName: string, symbol = "₹"): void {
+  const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+  registerFont(doc);
+
   const pageWidth = doc.internal.pageSize.getWidth();
-  const money = (n: number) => `Rs. ${formatIndianNumber(n)}`;
-
-  doc.setFillColor(24, 24, 27);
-  doc.rect(0, 0, pageWidth, 78, "F");
-  doc.setTextColor(212, 175, 80);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(17);
-  doc.text(appName, 40, 34);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
-  doc.setTextColor(230, 230, 235);
-  doc.text(
-    `Vehicle: ${report.vehicleLabel}    |    Period: ${formatDateShort(report.fromDate)} to ${formatDateShort(report.toDate)}`,
-    40,
-    56,
-  );
-  doc.text(`Generated: ${formatDateShort(new Date().toISOString())}`, pageWidth - 40, 56, { align: "right" });
-
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const contentWidth = pageWidth - MARGIN * 2;
+  const money = (n: number) => formatMoney(n, symbol);
   const s = report.summary;
-  autoTable(doc, {
-    startY: 96,
-    theme: "grid",
-    styles: { font: "helvetica", fontSize: 9, cellPadding: 5, textColor: [35, 35, 40] },
-    headStyles: { fillColor: [42, 42, 48], textColor: [235, 205, 130], fontStyle: "bold" },
-    head: [["Total Trips", "Income", "Diesel", "Driver", "Other Expense", "EMI", "Total Expense", "Net Profit"]],
-    body: [
-      [
-        String(s.trips),
-        money(s.income),
-        money(s.diesel),
-        money(s.driverPayment),
-        money(s.otherExpenses),
-        money(s.emiShare),
-        money(s.totalExpense),
-        money(s.profit),
-      ],
-    ],
+
+  /* ---------- header ---------- */
+  doc.setFillColor(24, 24, 27);
+  doc.rect(0, 0, pageWidth, 84, "F");
+  doc.setFont(FONT, "bold");
+  doc.setFontSize(16);
+  doc.setTextColor(212, 175, 80);
+  doc.text(appName, MARGIN, 32);
+
+  doc.setFont(FONT, "normal");
+  doc.setFontSize(9.5);
+  doc.setTextColor(232, 232, 238);
+  doc.text(`Vehicle: ${report.vehicleLabel}`, MARGIN, 52);
+  doc.text(`Period: ${formatDate(report.fromDate)} to ${formatDate(report.toDate)}`, MARGIN, 68);
+
+  doc.setFontSize(8.5);
+  doc.setTextColor(190, 190, 200);
+  doc.text(`Generated: ${formatDate(new Date().toISOString())}`, pageWidth - MARGIN, 52, { align: "right" });
+  doc.text(`${s.trips} trip(s)`, pageWidth - MARGIN, 68, { align: "right" });
+
+  /* ---------- summary cards ---------- */
+  const cards: Array<[string, string, [number, number, number]]> = [
+    ["TOTAL INCOME", money(s.income), [30, 30, 34]],
+    ["TOTAL EXPENSE", money(s.totalExpense), [30, 30, 34]],
+    ["NET PROFIT", money(s.profit), s.profit >= 0 ? [22, 84, 56] : [124, 34, 34]],
+  ];
+  const gap = 12;
+  const cardW = (contentWidth - gap * 2) / 3;
+  const cardY = 104;
+  const cardH = 52;
+  cards.forEach(([label, value, fill], i) => {
+    const x = MARGIN + i * (cardW + gap);
+    doc.setFillColor(fill[0], fill[1], fill[2]);
+    doc.roundedRect(x, cardY, cardW, cardH, 6, 6, "F");
+    doc.setFont(FONT, "normal");
+    doc.setFontSize(7.5);
+    doc.setTextColor(198, 198, 206);
+    doc.text(label, x + 10, cardY + 19);
+    doc.setFont(FONT, "bold");
+    doc.setFontSize(13);
+    doc.setTextColor(235, 205, 130);
+    doc.text(value, x + 10, cardY + 39);
   });
 
-  const afterSummary = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 22;
+  /* ---------- trip table ---------- */
+  const tableStart = cardY + cardH + 22;
+  const numeric = { halign: "right" as const };
 
   autoTable(doc, {
-    startY: afterSummary,
-    theme: "striped",
+    startY: tableStart,
+    margin: { left: MARGIN, right: MARGIN, bottom: 46 },
+    theme: "grid",
+    tableWidth: contentWidth,
     showHead: "everyPage",
-    styles: { font: "helvetica", fontSize: 8.5, cellPadding: 4.5, textColor: [35, 35, 40] },
-    headStyles: { fillColor: [42, 42, 48], textColor: [235, 205, 130], fontStyle: "bold" },
-    alternateRowStyles: { fillColor: [246, 246, 248] },
-    columnStyles: {
-      2: { halign: "right" },
-      3: { halign: "right" },
-      4: { halign: "right" },
-      5: { halign: "right" },
-      6: { halign: "right" },
-      7: { halign: "right" },
-      8: { halign: "right" },
+    styles: {
+      font: FONT,
+      fontSize: 7.6,
+      cellPadding: { top: 5, bottom: 5, left: 4, right: 4 },
+      textColor: [38, 38, 44],
+      lineColor: [216, 216, 222],
+      lineWidth: 0.4,
+      overflow: "linebreak",
     },
-    head: [
-      ["Date", "Vehicle", "Income", "Diesel", "Driver", "Other Expense", "EMI", "Total Expense", "Profit"],
-    ],
+    headStyles: {
+      font: FONT,
+      fontStyle: "bold",
+      fillColor: [34, 34, 39],
+      textColor: [235, 205, 130],
+      fontSize: 7.4,
+      halign: "right",
+    },
+    alternateRowStyles: { fillColor: [247, 247, 249] },
+    columnStyles: {
+      0: { cellWidth: 56, halign: "left" },
+      1: { cellWidth: 76, halign: "left" },
+      2: { ...numeric },
+      3: { ...numeric },
+      4: { ...numeric },
+      5: { ...numeric },
+      6: { ...numeric },
+      7: { ...numeric },
+      8: { ...numeric, fontStyle: "bold" },
+    },
+    head: [["Date", "Vehicle", "Income", "Diesel", "Driver", "Other", "EMI", "Expense", "Profit"]],
     body: report.rows.map((r) => [
       formatDateShort(r.date),
       r.vehicleName,
@@ -95,44 +143,32 @@ export function downloadReportPdf(report: ReportPayload, appName: string): void 
         money(s.profit),
       ],
     ],
-    footStyles: { fillColor: [24, 24, 27], textColor: [235, 205, 130], fontStyle: "bold", halign: "right" },
+    footStyles: {
+      font: FONT,
+      fontStyle: "bold",
+      fillColor: [24, 24, 27],
+      textColor: [235, 205, 130],
+      halign: "right",
+      fontSize: 7.6,
+    },
+    didParseCell: (data) => {
+      if (data.section === "foot" && data.column.index < 2) data.cell.styles.halign = "left";
+      if (data.section === "head" && data.column.index < 2) data.cell.styles.halign = "left";
+    },
   });
 
-  // Other expense breakdown per trip, when items exist
-  const withItems = report.rows.filter((r) => (r.otherExpenseItems ?? []).length > 0);
-  if (withItems.length > 0) {
-    const y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 24;
-    autoTable(doc, {
-      startY: y,
-      theme: "grid",
-      showHead: "everyPage",
-      styles: { font: "helvetica", fontSize: 8.5, cellPadding: 4.5 },
-      headStyles: { fillColor: [42, 42, 48], textColor: [235, 205, 130], fontStyle: "bold" },
-      columnStyles: { 3: { halign: "right" }, 4: { halign: "right" } },
-      head: [["Date", "Vehicle", "Expense Item", "Amount", "Trip Other Total"]],
-      body: withItems.flatMap((r) =>
-        (r.otherExpenseItems ?? []).map((item, index) => [
-          index === 0 ? formatDateShort(r.date) : "",
-          index === 0 ? r.vehicleName : "",
-          item.name,
-          money(item.amount),
-          index === 0 ? money(r.otherExpenses) : "",
-        ]),
-      ),
-    });
-  }
-
+  /* ---------- footer + page numbers ---------- */
   const pages = doc.getNumberOfPages();
   for (let i = 1; i <= pages; i += 1) {
     doc.setPage(i);
-    doc.setFontSize(8);
-    doc.setTextColor(120, 120, 128);
-    doc.text(`${appName} · ${report.vehicleLabel}`, 40, doc.internal.pageSize.getHeight() - 18);
-    doc.text(`Page ${i} of ${pages}`, pageWidth - 40, doc.internal.pageSize.getHeight() - 18, {
-      align: "right",
-    });
+    doc.setFont(FONT, "normal");
+    doc.setFontSize(7.5);
+    doc.setTextColor(125, 125, 133);
+    doc.text(`${appName} · ${report.vehicleLabel}`, MARGIN, pageHeight - 20);
+    if (pages > 1) {
+      doc.text(`Page ${i} of ${pages}`, pageWidth - MARGIN, pageHeight - 20, { align: "right" });
+    }
   }
 
-  const safe = report.vehicleLabel.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
-  doc.save(`report-${safe}-${report.fromDate}-to-${report.toDate}.pdf`);
+  doc.save(`vehicle-report-${slug(report.vehicleLabel)}-${report.fromDate}-to-${report.toDate}.pdf`);
 }

@@ -117,11 +117,14 @@ function ReportsPage() {
                   </p>
                 </div>
                 <Button
-                  onClick={() => downloadReportPdf(report, appName)}
+                  onClick={() => downloadReportPdf(report, appName, symbol)}
                   className="h-11 shrink-0 rounded-xl px-4 font-semibold"
                 >
-                  <Download className="mr-1.5 h-4 w-4" /> PDF
+                  <Download className="mr-1.5 h-4 w-4" />
+                  <span className="hidden sm:inline">Download Report</span>
+                  <span className="sm:hidden">PDF</span>
                 </Button>
+
               </div>
 
               <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
