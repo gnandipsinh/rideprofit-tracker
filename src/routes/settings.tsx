@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { Save, Server } from "lucide-react";
+import { Save } from "lucide-react";
 import { toast } from "sonner";
-import { useHealth } from "@/lib/queries";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,7 +9,6 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useApp } from "@/lib/app-context";
 import { useSaveSettings } from "@/lib/queries";
-import { DEFAULT_API_BASE_URL, getApiBaseUrl, setApiBaseUrl } from "@/lib/api";
 
 const CURRENCIES = [
   { value: "INR", label: "INR — Indian Rupee (₹)" },
@@ -40,13 +38,10 @@ export const Route = createFileRoute("/settings")({
 function SettingsPage() {
   const { settings, vehicles } = useApp();
   const save = useSaveSettings();
-  const health = useHealth();
-
 
   const [appName, setAppName] = useState("");
   const [currency, setCurrency] = useState("INR");
   const [defaultVehicleId, setDefaultVehicleId] = useState(NO_DEFAULT);
-  const [apiUrl, setApiUrl] = useState("");
 
   useEffect(() => {
     if (!settings) return;
@@ -54,10 +49,6 @@ function SettingsPage() {
     setCurrency(settings.currency || "INR");
     setDefaultVehicleId(settings.defaultVehicleId ?? NO_DEFAULT);
   }, [settings]);
-
-  useEffect(() => {
-    setApiUrl(getApiBaseUrl());
-  }, []);
 
   const submit = () => {
     if (!appName.trim()) {
@@ -71,11 +62,6 @@ function SettingsPage() {
     });
   };
 
-  const saveBackend = () => {
-    setApiBaseUrl(apiUrl);
-    toast.success("Backend URL saved");
-    window.location.reload();
-  };
 
   return (
     <AppShell showAddTrip={false}>
@@ -140,38 +126,13 @@ function SettingsPage() {
           </Button>
         </section>
 
-        <section className="glass-card space-y-3 rounded-2xl p-4">
-          <div className="flex items-center gap-2">
-            <Server className="h-4 w-4 text-primary" />
-            <h3 className="text-sm font-bold">Backend connection</h3>
-          </div>
+        <section className="glass-card space-y-2 rounded-2xl p-4">
+          <h3 className="text-sm font-bold">Database</h3>
           <p className="text-xs text-muted-foreground">
-            URL of your Express + MongoDB API (the code in <span className="font-mono">/server</span>). Default:{" "}
-            <span className="font-mono break-all">{DEFAULT_API_BASE_URL}</span>
-          </p>
-          <Input
-            value={apiUrl}
-            onChange={(e) => setApiUrl(e.target.value)}
-            className="h-12 rounded-xl font-mono text-sm"
-            placeholder="https://your-backend-url.com/api"
-            inputMode="url"
-            autoCapitalize="none"
-            spellCheck={false}
-          />
-          <Button onClick={saveBackend} variant="secondary" className="h-12 w-full rounded-xl font-semibold">
-            Save backend URL
-          </Button>
-          <p className="text-xs font-semibold">
-            Status:{" "}
-            {health.isLoading ? (
-              <span className="text-muted-foreground">checking…</span>
-            ) : health.isError ? (
-              <span className="text-muted-foreground">not connected — enter your deployed API URL above</span>
-            ) : (
-              <span className="text-primary">connected</span>
-            )}
+            Your data is stored in this app's built-in cloud database. No external backend URL is needed.
           </p>
         </section>
+
       </div>
     </AppShell>
   );
