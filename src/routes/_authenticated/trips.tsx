@@ -24,7 +24,7 @@ import { aggregate, profitOf, totalExpenseOf } from "@/lib/calc";
 import { formatDate, formatMoney, todayInput, toDateInput } from "@/lib/format";
 import type { Trip } from "@/lib/types";
 
-export const Route = createFileRoute("/trips")({
+export const Route = createFileRoute("/_authenticated/trips")({
   head: () => ({
     meta: [
       { title: "Trips — Daily Trip Entry" },

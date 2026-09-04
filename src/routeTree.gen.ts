@@ -9,122 +9,172 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as ReportsRouteImport } from './routes/reports'
-import { Route as SettingsRouteImport } from './routes/settings'
-import { Route as TripsRouteImport } from './routes/trips'
-import { Route as VehiclesRouteImport } from './routes/vehicles'
+import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
+import { Route as AuthRouteImport } from './routes/auth'
+import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
+import { Route as AuthenticatedReportsRouteImport } from './routes/_authenticated/reports'
+import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
+import { Route as AuthenticatedTripsRouteImport } from './routes/_authenticated/trips'
+import { Route as AuthenticatedVehiclesRouteImport } from './routes/_authenticated/vehicles'
 
-const IndexRoute = IndexRouteImport.update({
+const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
+  id: '/_authenticated',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthRoute = AuthRouteImport.update({
+  id: '/auth',
+  path: '/auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-const ReportsRoute = ReportsRouteImport.update({
+const AuthenticatedReportsRoute = AuthenticatedReportsRouteImport.update({
   id: '/reports',
   path: '/reports',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-const SettingsRoute = SettingsRouteImport.update({
+const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-const TripsRoute = TripsRouteImport.update({
+const AuthenticatedTripsRoute = AuthenticatedTripsRouteImport.update({
   id: '/trips',
   path: '/trips',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
-const VehiclesRoute = VehiclesRouteImport.update({
+const AuthenticatedVehiclesRoute = AuthenticatedVehiclesRouteImport.update({
   id: '/vehicles',
   path: '/vehicles',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
-  '/reports': typeof ReportsRoute
-  '/settings': typeof SettingsRoute
-  '/trips': typeof TripsRoute
-  '/vehicles': typeof VehiclesRoute
+  '/': typeof AuthenticatedIndexRoute
+  '/auth': typeof AuthRoute
+  '/reports': typeof AuthenticatedReportsRoute
+  '/settings': typeof AuthenticatedSettingsRoute
+  '/trips': typeof AuthenticatedTripsRoute
+  '/vehicles': typeof AuthenticatedVehiclesRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
-  '/reports': typeof ReportsRoute
-  '/settings': typeof SettingsRoute
-  '/trips': typeof TripsRoute
-  '/vehicles': typeof VehiclesRoute
+  '/auth': typeof AuthRoute
+  '/reports': typeof AuthenticatedReportsRoute
+  '/settings': typeof AuthenticatedSettingsRoute
+  '/trips': typeof AuthenticatedTripsRoute
+  '/vehicles': typeof AuthenticatedVehiclesRoute
+  '/': typeof AuthenticatedIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
-  '/reports': typeof ReportsRoute
-  '/settings': typeof SettingsRoute
-  '/trips': typeof TripsRoute
-  '/vehicles': typeof VehiclesRoute
+  '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
+  '/auth': typeof AuthRoute
+  '/_authenticated/reports': typeof AuthenticatedReportsRoute
+  '/_authenticated/settings': typeof AuthenticatedSettingsRoute
+  '/_authenticated/trips': typeof AuthenticatedTripsRoute
+  '/_authenticated/vehicles': typeof AuthenticatedVehiclesRoute
+  '/_authenticated/': typeof AuthenticatedIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/reports' | '/settings' | '/trips' | '/vehicles'
+  fullPaths: '/' | '/auth' | '/reports' | '/settings' | '/trips' | '/vehicles'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/reports' | '/settings' | '/trips' | '/vehicles'
-  id: '__root__' | '/' | '/reports' | '/settings' | '/trips' | '/vehicles'
+  to: '/auth' | '/reports' | '/settings' | '/trips' | '/vehicles' | '/'
+  id:
+    | '__root__'
+    | '/_authenticated'
+    | '/auth'
+    | '/_authenticated/reports'
+    | '/_authenticated/settings'
+    | '/_authenticated/trips'
+    | '/_authenticated/vehicles'
+    | '/_authenticated/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
-  ReportsRoute: typeof ReportsRoute
-  SettingsRoute: typeof SettingsRoute
-  TripsRoute: typeof TripsRoute
-  VehiclesRoute: typeof VehiclesRoute
+  AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
+  AuthRoute: typeof AuthRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
+    '/_authenticated': {
+      id: '/_authenticated'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AuthenticatedRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/auth': {
+      id: '/auth'
+      path: '/auth'
+      fullPath: '/auth'
+      preLoaderRoute: typeof AuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated/': {
+      id: '/_authenticated/'
       path: '/'
       fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AuthenticatedIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/reports': {
-      id: '/reports'
+    '/_authenticated/reports': {
+      id: '/_authenticated/reports'
       path: '/reports'
       fullPath: '/reports'
-      preLoaderRoute: typeof ReportsRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AuthenticatedReportsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/settings': {
-      id: '/settings'
+    '/_authenticated/settings': {
+      id: '/_authenticated/settings'
       path: '/settings'
       fullPath: '/settings'
-      preLoaderRoute: typeof SettingsRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AuthenticatedSettingsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/trips': {
-      id: '/trips'
+    '/_authenticated/trips': {
+      id: '/_authenticated/trips'
       path: '/trips'
       fullPath: '/trips'
-      preLoaderRoute: typeof TripsRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AuthenticatedTripsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
-    '/vehicles': {
-      id: '/vehicles'
+    '/_authenticated/vehicles': {
+      id: '/_authenticated/vehicles'
       path: '/vehicles'
       fullPath: '/vehicles'
-      preLoaderRoute: typeof VehiclesRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AuthenticatedVehiclesRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
   }
 }
 
+interface AuthenticatedRouteRouteChildren {
+  AuthenticatedReportsRoute: typeof AuthenticatedReportsRoute
+  AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
+  AuthenticatedTripsRoute: typeof AuthenticatedTripsRoute
+  AuthenticatedVehiclesRoute: typeof AuthenticatedVehiclesRoute
+  AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
+}
+
+const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
+  AuthenticatedReportsRoute: AuthenticatedReportsRoute,
+  AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
+  AuthenticatedTripsRoute: AuthenticatedTripsRoute,
+  AuthenticatedVehiclesRoute: AuthenticatedVehiclesRoute,
+  AuthenticatedIndexRoute: AuthenticatedIndexRoute,
+}
+
+const AuthenticatedRouteRouteWithChildren =
+  AuthenticatedRouteRoute._addFileChildren(AuthenticatedRouteRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
-  ReportsRoute: ReportsRoute,
-  SettingsRoute: SettingsRoute,
-  TripsRoute: TripsRoute,
-  VehiclesRoute: VehiclesRoute,
+  AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
+  AuthRoute: AuthRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

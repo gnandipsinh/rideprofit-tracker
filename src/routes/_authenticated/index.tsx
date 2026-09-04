@@ -27,7 +27,7 @@ import { DASHBOARD_PRESETS, dashboardRange, type DashboardPreset } from "@/lib/d
 import { todayInput } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-export const Route = createFileRoute("/")({
+export const Route = createFileRoute("/_authenticated/")({
   head: () => ({
     meta: [
       { title: "Dashboard — Vehicle Trip Profit Tracker" },

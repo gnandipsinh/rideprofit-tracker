@@ -32,7 +32,7 @@ import { useDeleteVehicle, useSaveVehicle } from "@/lib/queries";
 import { VEHICLE_TYPES, type Vehicle, type VehiclePayload } from "@/lib/types";
 import { toast } from "sonner";
 
-export const Route = createFileRoute("/vehicles")({
+export const Route = createFileRoute("/_authenticated/vehicles")({
   head: () => ({
     meta: [
       { title: "Vehicles — Fleet Manager" },
