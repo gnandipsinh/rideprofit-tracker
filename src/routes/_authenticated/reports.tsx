@@ -14,7 +14,7 @@ import { formatDateShort, formatMoney, todayInput } from "@/lib/format";
 import { REPORT_PRESETS, reportRange, type ReportPreset } from "@/lib/date-ranges";
 import { cn } from "@/lib/utils";
 
-export const Route = createFileRoute("/reports")({
+export const Route = createFileRoute("/_authenticated/reports")({
   head: () => ({
     meta: [
       { title: "Reports — Vehicle Profit & Expense Report" },
