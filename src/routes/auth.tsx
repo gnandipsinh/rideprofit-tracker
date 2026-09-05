@@ -23,6 +23,8 @@ import {
   sendRecoveryOtp,
   verifyLoginOtp,
   verifyRecoveryOtp,
+  verifySignupOtp,
+
 } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
@@ -281,7 +283,11 @@ function AuthPage() {
     setBusy(true);
     try {
       const res =
-        otpPurpose === "reset" ? await verifyRecoveryOtp(email, parsed.data) : await verifyLoginOtp(email, parsed.data);
+        otpPurpose === "reset"
+          ? await verifyRecoveryOtp(email, parsed.data)
+          : otpPurpose === "register"
+            ? await verifySignupOtp(email, parsed.data)
+            : await verifyLoginOtp(email, parsed.data);
       if (res.error) {
         const attempts = otpAttempts + 1;
         setOtpAttempts(attempts);
@@ -298,8 +304,11 @@ function AuthPage() {
         reset("reset");
         return;
       }
+      // Wait for the session to be persisted before entering the protected area.
+      await supabase.auth.getUser();
       toast.success(otpPurpose === "register" ? "Account verified. Welcome!" : "Signed in successfully");
       navigate({ to: "/", replace: true });
+
     } catch {
       setFormError(GENERIC_ERROR);
     } finally {
