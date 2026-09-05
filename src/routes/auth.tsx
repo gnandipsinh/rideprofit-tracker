@@ -26,7 +26,9 @@ import {
   verifySignupOtp,
 
 } from "@/lib/auth";
+import { ensureDemoUser } from "@/lib/demo.functions";
 import { cn } from "@/lib/utils";
+
 
 export const Route = createFileRoute("/auth")({
   head: () => ({
