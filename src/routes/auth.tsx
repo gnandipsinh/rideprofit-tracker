@@ -65,9 +65,9 @@ function PasswordField({
   label: string;
   value: string;
   onChange: (v: string) => void;
-  error?: string;
-  autoComplete?: string;
-  placeholder?: string;
+  error?: string | undefined;
+  autoComplete?: string | undefined;
+  placeholder?: string | undefined;
 }) {
   const [show, setShow] = useState(false);
   return (
@@ -108,7 +108,7 @@ function Field({
   id: string;
   label: string;
   icon: typeof Mail;
-  error?: string;
+  error?: string | undefined;
 }) {
   return (
     <div className="space-y-1.5">
