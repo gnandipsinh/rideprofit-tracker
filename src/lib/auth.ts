@@ -85,6 +85,15 @@ export async function verifyLoginOtp(email: string, token: string) {
   return supabase.auth.verifyOtp({ email, token, type: "email" });
 }
 
+/** Verifies the code emailed right after registration. */
+export async function verifySignupOtp(email: string, token: string) {
+  const res = await supabase.auth.verifyOtp({ email, token, type: "signup" });
+  if (!res.error) return res;
+  // Some projects deliver the activation code as a magic-link style email token.
+  return supabase.auth.verifyOtp({ email, token, type: "email" });
+}
+
+
 export async function verifyRecoveryOtp(email: string, token: string) {
   return supabase.auth.verifyOtp({ email, token, type: "recovery" });
 }
