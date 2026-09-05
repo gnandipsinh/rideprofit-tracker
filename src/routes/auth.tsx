@@ -209,7 +209,12 @@ function AuthPage() {
       }
       setPassword("");
       setConfirmPassword("");
-      await startOtp("register", parsed.data.email);
+      // Sign-up already emails a 6-digit code — do not send a second one (rate limit).
+      setOtpAttempts(0);
+      setCooldown(RESEND_COOLDOWN_SECONDS);
+      reset("otp");
+      setOtpPurpose("register");
+      toast.success(`Verification code sent to ${parsed.data.email}`);
     } catch {
       setFormError(GENERIC_ERROR);
     } finally {
