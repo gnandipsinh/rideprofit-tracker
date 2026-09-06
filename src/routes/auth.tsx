@@ -26,7 +26,6 @@ import {
   verifySignupOtp,
 
 } from "@/lib/auth";
-import { ensureDemoUser } from "@/lib/demo.functions";
 import { cn } from "@/lib/utils";
 
 
@@ -226,28 +225,6 @@ function AuthPage() {
     }
   }
 
-  async function handleDemoLogin() {
-    setErrors({});
-    setFormError("");
-    setBusy(true);
-    try {
-      const creds = await ensureDemoUser();
-      const { error } = await supabase.auth.signInWithPassword({
-        email: creds.email,
-        password: creds.password,
-      });
-      if (error) {
-        setFormError("Demo access is not available right now. Please try again.");
-        return;
-      }
-      toast.success("Signed in with the demo account");
-      await navigate({ to: "/" });
-    } catch {
-      setFormError("Demo access is not available right now. Please try again.");
-    } finally {
-      setBusy(false);
-    }
-  }
 
   async function handleLogin(e: React.FormEvent) {
 
