@@ -57,6 +57,7 @@ export function AppShell({ children, showAddTrip = true }: { children: ReactNode
               </p>
             </div>
           </div>
+          <div className="flex shrink-0 items-center gap-1">
           <nav className="hidden shrink-0 items-center gap-1 md:flex">
             {NAV.map((item) => (
               <Link
