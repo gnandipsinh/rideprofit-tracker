@@ -72,6 +72,18 @@ export function AppShell({ children, showAddTrip = true }: { children: ReactNode
               </Link>
             ))}
           </nav>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={signingOut}
+              onClick={handleSignOut}
+              className="tap-scale gap-1.5 text-muted-foreground hover:text-foreground"
+            >
+              <LogOut className="h-4 w-4" />
+              <span className="hidden sm:inline">Sign out</span>
+            </Button>
+          </div>
         </div>
         <div className="h-px w-full gold-rule opacity-30" />
       </header>
