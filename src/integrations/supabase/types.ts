@@ -22,6 +22,7 @@ export type Database = {
           default_vehicle_id: string | null
           id: string
           updated_at: string
+          user_id: string
         }
         Insert: {
           app_name?: string
@@ -30,6 +31,7 @@ export type Database = {
           default_vehicle_id?: string | null
           id?: string
           updated_at?: string
+          user_id?: string
         }
         Update: {
           app_name?: string
@@ -38,6 +40,7 @@ export type Database = {
           default_vehicle_id?: string | null
           id?: string
           updated_at?: string
+          user_id?: string
         }
         Relationships: [
           {
@@ -88,6 +91,7 @@ export type Database = {
           notes: string
           other_expense_items: Json
           updated_at: string
+          user_id: string
           vehicle_id: string
         }
         Insert: {
@@ -101,6 +105,7 @@ export type Database = {
           notes?: string
           other_expense_items?: Json
           updated_at?: string
+          user_id?: string
           vehicle_id: string
         }
         Update: {
@@ -114,6 +119,7 @@ export type Database = {
           notes?: string
           other_expense_items?: Json
           updated_at?: string
+          user_id?: string
           vehicle_id?: string
         }
         Relationships: [
@@ -135,6 +141,7 @@ export type Database = {
           notes: string
           type: string
           updated_at: string
+          user_id: string
           vehicle_number: string
         }
         Insert: {
@@ -145,6 +152,7 @@ export type Database = {
           notes?: string
           type?: string
           updated_at?: string
+          user_id?: string
           vehicle_number?: string
         }
         Update: {
@@ -155,6 +163,7 @@ export type Database = {
           notes?: string
           type?: string
           updated_at?: string
+          user_id?: string
           vehicle_number?: string
         }
         Relationships: []

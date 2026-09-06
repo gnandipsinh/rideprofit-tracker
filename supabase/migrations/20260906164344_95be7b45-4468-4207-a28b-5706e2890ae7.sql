@@ -1,0 +1,1 @@
+REVOKE EXECUTE ON FUNCTION public.enforce_unique_profile_mobile() FROM PUBLIC, anon, authenticated;

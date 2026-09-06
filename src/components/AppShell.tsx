@@ -1,8 +1,10 @@
 import { useState, type ReactNode } from "react";
-import { Link, useRouterState } from "@tanstack/react-router";
-import { LayoutDashboard, Truck, Route as RouteIcon, FileText, Settings as SettingsIcon, Plus, PlugZap, X } from "lucide-react";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
+import { LayoutDashboard, Truck, Route as RouteIcon, FileText, Settings as SettingsIcon, Plus, PlugZap, X, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TripFormDialog } from "@/components/TripFormDialog";
+import { supabase } from "@/integrations/supabase/client";
 import { useApp } from "@/lib/app-context";
 import { useHealth } from "@/lib/queries";
 import { cn } from "@/lib/utils";
@@ -21,8 +23,24 @@ export function AppShell({ children, showAddTrip = true }: { children: ReactNode
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const [tripOpen, setTripOpen] = useState(false);
   const [dismissed, setDismissed] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const offline = health.isError;
+
+  async function handleSignOut() {
+    setSigningOut(true);
+    try {
+      await queryClient.cancelQueries();
+      queryClient.clear();
+      await supabase.auth.signOut();
+      if (typeof window !== "undefined") window.localStorage.removeItem("vcs.selectedVehicleId");
+      await navigate({ to: "/auth", replace: true });
+    } finally {
+      setSigningOut(false);
+    }
+  }
 
   return (
     <div className="min-h-screen pb-24">
@@ -39,6 +57,7 @@ export function AppShell({ children, showAddTrip = true }: { children: ReactNode
               </p>
             </div>
           </div>
+          <div className="flex shrink-0 items-center gap-1">
           <nav className="hidden shrink-0 items-center gap-1 md:flex">
             {NAV.map((item) => (
               <Link
@@ -53,6 +72,18 @@ export function AppShell({ children, showAddTrip = true }: { children: ReactNode
               </Link>
             ))}
           </nav>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={signingOut}
+              onClick={handleSignOut}
+              className="tap-scale gap-1.5 text-muted-foreground hover:text-foreground"
+            >
+              <LogOut className="h-4 w-4" />
+              <span className="hidden sm:inline">Sign out</span>
+            </Button>
+          </div>
         </div>
         <div className="h-px w-full gold-rule opacity-30" />
       </header>
