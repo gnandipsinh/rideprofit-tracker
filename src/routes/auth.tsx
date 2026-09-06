@@ -452,24 +452,6 @@ function AuthPage() {
                 {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
                 Continue securely
               </Button>
-              <div className="flex items-center gap-3 py-1">
-                <span className="h-px flex-1 bg-border" />
-                <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">or</span>
-                <span className="h-px flex-1 bg-border" />
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={busy}
-                onClick={handleDemoLogin}
-                className="h-12 w-full text-sm font-bold"
-              >
-                {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                Temporary demo login
-              </Button>
-              <p className="text-center text-[11px] text-muted-foreground">
-                Opens the app instantly with sample vehicles and trips.
-              </p>
               <p className="text-center text-xs text-muted-foreground">
                 New here?{" "}
                 <button type="button" onClick={() => reset("register")} className="font-semibold text-primary hover:underline">
