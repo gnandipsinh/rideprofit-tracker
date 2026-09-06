@@ -23,8 +23,24 @@ export function AppShell({ children, showAddTrip = true }: { children: ReactNode
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const [tripOpen, setTripOpen] = useState(false);
   const [dismissed, setDismissed] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const offline = health.isError;
+
+  async function handleSignOut() {
+    setSigningOut(true);
+    try {
+      await queryClient.cancelQueries();
+      queryClient.clear();
+      await supabase.auth.signOut();
+      if (typeof window !== "undefined") window.localStorage.removeItem("vcs.selectedVehicleId");
+      await navigate({ to: "/auth", replace: true });
+    } finally {
+      setSigningOut(false);
+    }
+  }
 
   return (
     <div className="min-h-screen pb-24">
