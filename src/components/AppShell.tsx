@@ -1,8 +1,10 @@
 import { useState, type ReactNode } from "react";
-import { Link, useRouterState } from "@tanstack/react-router";
-import { LayoutDashboard, Truck, Route as RouteIcon, FileText, Settings as SettingsIcon, Plus, PlugZap, X } from "lucide-react";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
+import { LayoutDashboard, Truck, Route as RouteIcon, FileText, Settings as SettingsIcon, Plus, PlugZap, X, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TripFormDialog } from "@/components/TripFormDialog";
+import { supabase } from "@/integrations/supabase/client";
 import { useApp } from "@/lib/app-context";
 import { useHealth } from "@/lib/queries";
 import { cn } from "@/lib/utils";
