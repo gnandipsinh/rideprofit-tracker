@@ -10,6 +10,7 @@ const otherExpenseItemSchema = new Schema(
 
 const tripSchema = new Schema(
   {
+    userId: { type: String, required: true, index: true },
     vehicleId: { type: Types.ObjectId, ref: "Vehicle", required: true, index: true },
     date: { type: Date, required: true, index: true },
     income: { type: Number, required: true, min: 0, default: 0 },
@@ -23,7 +24,7 @@ const tripSchema = new Schema(
   { timestamps: true },
 );
 
-tripSchema.index({ vehicleId: 1, date: -1 });
+tripSchema.index({ userId: 1, vehicleId: 1, date: -1 });
 
 /** Server is the source of truth for derived amounts. */
 tripSchema.pre("validate", function (next) {

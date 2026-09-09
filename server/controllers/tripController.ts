@@ -19,7 +19,7 @@ function buildFilter(query: Request["query"]) {
 }
 
 export async function listTrips(req: Request, res: Response) {
-  const filter = buildFilter(req.query);
+  const filter = { ...buildFilter(req.query), userId: req.authUser!.id };
   const limit = Math.min(Number(req.query.limit) || 500, 2000);
   const page = Math.max(Number(req.query.page) || 1, 1);
 
@@ -36,20 +36,20 @@ export async function listTrips(req: Request, res: Response) {
 
 export async function listTripsByVehicle(req: Request, res: Response) {
   const vehicleId = objectId.parse(req.params.vehicleId);
-  const trips = await Trip.find({ vehicleId }).sort({ date: -1, createdAt: -1 });
+  const trips = await Trip.find({ vehicleId, userId: req.authUser!.id }).sort({ date: -1, createdAt: -1 });
   res.json({ success: true, data: trips });
 }
 
 export async function getTrip(req: Request, res: Response) {
   const id = objectId.parse(req.params.id);
-  const trip = await Trip.findById(id);
+  const trip = await Trip.findOne({ _id: id, userId: req.authUser!.id });
   if (!trip) throw new HttpError(404, "Trip not found");
   res.json({ success: true, data: trip });
 }
 
-async function normalize(body: unknown) {
+async function normalize(body: unknown, userId: string) {
   const parsed = tripSchema.parse(body);
-  const vehicle = await Vehicle.findById(parsed.vehicleId);
+  const vehicle = await Vehicle.findOne({ _id: parsed.vehicleId, userId });
   if (!vehicle) throw new HttpError(400, "Selected vehicle does not exist");
 
   const otherExpenses =
@@ -57,26 +57,29 @@ async function normalize(body: unknown) {
       ? parsed.otherExpenseItems.reduce((sum, i) => sum + i.amount, 0)
       : (parsed.otherExpenses ?? 0);
 
-  return { ...parsed, otherExpenses, date: parseDayStart(parsed.date) };
+  return { ...parsed, userId, otherExpenses, date: parseDayStart(parsed.date) };
 }
 
 export async function createTrip(req: Request, res: Response) {
-  const payload = await normalize(req.body);
+  const payload = await normalize(req.body, req.authUser!.id);
   const trip = await Trip.create(payload);
   res.status(201).json({ success: true, data: trip });
 }
 
 export async function updateTrip(req: Request, res: Response) {
   const id = objectId.parse(req.params.id);
-  const payload = await normalize(req.body);
-  const trip = await Trip.findByIdAndUpdate(id, payload, { new: true, runValidators: true });
+  const payload = await normalize(req.body, req.authUser!.id);
+  const trip = await Trip.findOneAndUpdate({ _id: id, userId: req.authUser!.id }, payload, {
+    new: true,
+    runValidators: true,
+  });
   if (!trip) throw new HttpError(404, "Trip not found");
   res.json({ success: true, data: trip });
 }
 
 export async function deleteTrip(req: Request, res: Response) {
   const id = objectId.parse(req.params.id);
-  const trip = await Trip.findByIdAndDelete(id);
+  const trip = await Trip.findOneAndDelete({ _id: id, userId: req.authUser!.id });
   if (!trip) throw new HttpError(404, "Trip not found");
   res.json({ success: true, data: { _id: id } });
 }

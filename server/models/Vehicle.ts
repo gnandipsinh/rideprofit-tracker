@@ -2,6 +2,7 @@ import { Schema, model, type InferSchemaType } from "mongoose";
 
 const vehicleSchema = new Schema(
   {
+    userId: { type: String, required: true, index: true },
     name: { type: String, required: true, trim: true },
     type: { type: String, required: true, trim: true, default: "Truck" },
     model: { type: String, default: "", trim: true },
@@ -11,7 +12,7 @@ const vehicleSchema = new Schema(
   { timestamps: true },
 );
 
-vehicleSchema.index({ name: 1 });
+vehicleSchema.index({ userId: 1, name: 1 });
 
 export type VehicleDoc = InferSchemaType<typeof vehicleSchema>;
 export const Vehicle = model("Vehicle", vehicleSchema);

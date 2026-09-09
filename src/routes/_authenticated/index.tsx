@@ -47,7 +47,7 @@ export const Route = createFileRoute("/_authenticated/")({
 });
 
 function Dashboard() {
-  const { symbol, selectedVehicleId, isAllVehicles, vehicles, vehiclesLoading } = useApp();
+  const { symbol, selectedVehicleId, isAllVehicles, vehicles, vehiclesLoading, vehiclesError } = useApp();
   const [preset, setPreset] = useState<DashboardPreset>("month");
   const [custom, setCustom] = useState({ fromDate: todayInput(), toDate: todayInput() });
 
@@ -115,7 +115,18 @@ function Dashboard() {
           ) : null}
         </div>
 
-        {!vehiclesLoading && vehicles.length === 0 ? (
+        {vehiclesError ? (
+          <EmptyState
+            icon={<Truck className="h-6 w-6" />}
+            title="Could not load your vehicles"
+            description={vehiclesError.message || "The vehicle data service is unavailable. Try again shortly."}
+            action={
+              <Button type="button" className="h-11 rounded-xl px-5 font-semibold" onClick={() => window.location.reload()}>
+                Retry
+              </Button>
+            }
+          />
+        ) : !vehiclesLoading && vehicles.length === 0 ? (
           <EmptyState
             icon={<Truck className="h-6 w-6" />}
             title="Add your first vehicle"
@@ -123,6 +134,17 @@ function Dashboard() {
             action={
               <Button asChild className="h-11 rounded-xl px-5 font-semibold">
                 <Link to="/vehicles">Add Vehicle</Link>
+              </Button>
+            }
+          />
+        ) : tripsQuery.isError ? (
+          <EmptyState
+            icon={<RouteIcon className="h-6 w-6" />}
+            title="Could not load trips"
+            description={tripsQuery.error instanceof Error ? tripsQuery.error.message : "The trip data service is unavailable."}
+            action={
+              <Button type="button" className="h-11 rounded-xl px-5 font-semibold" onClick={() => void tripsQuery.refetch()}>
+                Retry
               </Button>
             }
           />

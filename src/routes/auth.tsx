@@ -17,14 +17,12 @@ import {
   loginSchema,
   otpSchema,
   registerSchema,
+  resendSignupOtp,
   resetSchema,
   safeAuthMessage,
-  sendLoginOtp,
   sendRecoveryOtp,
-  verifyLoginOtp,
   verifyRecoveryOtp,
   verifySignupOtp,
-
 } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
@@ -35,13 +33,12 @@ export const Route = createFileRoute("/auth")({
       { title: "Secure Sign In — Vehicle Trip Profit Tracker" },
       {
         name: "description",
-        content:
-          "Sign in or create an account with email OTP verification to access your vehicle trip accounting dashboard.",
+        content: "Sign in or create an account to access your vehicle trip accounting dashboard.",
       },
       { property: "og:title", content: "Secure Sign In — Vehicle Trip Profit Tracker" },
       {
         property: "og:description",
-        content: "Two-step email OTP authentication for your fleet trip and profit records.",
+        content: "Secure password authentication for your fleet trip and profit records.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -51,7 +48,7 @@ export const Route = createFileRoute("/auth")({
 });
 
 type Step = "login" | "register" | "otp" | "forgot" | "reset";
-type OtpPurpose = "login" | "register" | "reset";
+type OtpPurpose = "register" | "reset";
 
 type Errors = Record<string, string>;
 
@@ -140,7 +137,7 @@ function AuthPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
 
   const [otp, setOtp] = useState("");
-  const [otpPurpose, setOtpPurpose] = useState<OtpPurpose>("login");
+  const [otpPurpose, setOtpPurpose] = useState<OtpPurpose>("register");
   const [otpAttempts, setOtpAttempts] = useState(0);
   const [cooldown, setCooldown] = useState(0);
 
@@ -173,7 +170,7 @@ function AuthPage() {
   }
 
   async function startOtp(purpose: OtpPurpose, targetEmail: string) {
-    const res = purpose === "reset" ? await sendRecoveryOtp(targetEmail) : await sendLoginOtp(targetEmail);
+    const res = purpose === "reset" ? await sendRecoveryOtp(targetEmail) : await resendSignupOtp(targetEmail);
     if (res.error) {
       setFormError(safeAuthMessage(res.error.message));
       return false;
@@ -202,7 +199,6 @@ function AuthPage() {
         email: parsed.data.email,
         password: parsed.data.password,
         options: {
-          emailRedirectTo: window.location.origin,
           data: { full_name: parsed.data.fullName, mobile: parsed.data.mobile },
         },
       });
@@ -246,10 +242,9 @@ function AuthPage() {
         setFormError(GENERIC_CREDENTIALS_ERROR);
         return;
       }
-      // Password verified — require a fresh email OTP before granting access.
-      await supabase.auth.signOut();
-      setPassword("");
-      await startOtp("login", parsed.data.email);
+      await supabase.auth.getUser();
+      toast.success("Signed in successfully");
+      navigate({ to: "/", replace: true });
     } catch {
       setFormError(GENERIC_ERROR);
     } finally {
@@ -290,7 +285,7 @@ function AuthPage() {
           ? await verifyRecoveryOtp(email, parsed.data)
           : otpPurpose === "register"
             ? await verifySignupOtp(email, parsed.data)
-            : await verifyLoginOtp(email, parsed.data);
+            : await verifySignupOtp(email, parsed.data);
       if (res.error) {
         const attempts = otpAttempts + 1;
         setOtpAttempts(attempts);
@@ -323,7 +318,12 @@ function AuthPage() {
     if (cooldown > 0) return;
     setBusy(true);
     try {
-      const res = otpPurpose === "reset" ? await sendRecoveryOtp(email) : await sendLoginOtp(email);
+      let res;
+      if (otpPurpose === "reset") {
+        res = await sendRecoveryOtp(email);
+      } else if (otpPurpose === "register") {
+        res = await resendSignupOtp(email);
+      }
       if (res.error) {
         setFormError(safeAuthMessage(res.error.message));
         return;
@@ -364,7 +364,7 @@ function AuthPage() {
   }
 
   const heading: Record<Step, { title: string; sub: string }> = {
-    login: { title: "Welcome back", sub: "Sign in, then confirm the code sent to your email." },
+    login: { title: "Welcome back", sub: "Sign in securely with your password." },
     register: { title: "Create your account", sub: "We'll email a 6-digit code to activate your account." },
     otp: { title: "Email verification", sub: `Enter the ${OTP_LENGTH}-digit code sent to ${maskedEmail}` },
     forgot: { title: "Forgot password", sub: "We'll email you a code to reset your password." },
@@ -427,7 +427,7 @@ function AuthPage() {
               </button>
               <Button type="submit" disabled={busy} className="h-12 w-full text-sm font-bold">
                 {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
-                Continue securely
+                Login
               </Button>
               <p className="text-center text-xs text-muted-foreground">
                 New here?{" "}
@@ -446,7 +446,7 @@ function AuthPage() {
                 label="Full name"
                 icon={User}
                 autoComplete="name"
-                placeholder="Gnandipsinh Gohil"
+                placeholder="Enter your full name"
                 value={fullName}
                 error={errors["fullName"]}
                 onChange={(e) => setFullName(e.target.value)}
@@ -458,7 +458,7 @@ function AuthPage() {
                 inputMode="numeric"
                 maxLength={10}
                 autoComplete="tel"
-                placeholder="9876543210"
+                placeholder="Enter mobile number"
                 value={mobile}
                 error={errors["mobile"]}
                 onChange={(e) => setMobile(e.target.value.replace(/\D/g, "").slice(0, 10))}
@@ -470,7 +470,7 @@ function AuthPage() {
                 type="email"
                 inputMode="email"
                 autoComplete="email"
-                placeholder="you@company.com"
+                placeholder="Enter your email"
                 value={email}
                 error={errors["email"]}
                 onChange={(e) => setEmail(e.target.value)}
@@ -479,6 +479,7 @@ function AuthPage() {
                 id="reg-password"
                 label="Password"
                 autoComplete="new-password"
+                placeholder="Enter password"
                 value={password}
                 onChange={setPassword}
                 error={errors["password"]}
@@ -487,6 +488,7 @@ function AuthPage() {
                 id="reg-confirm"
                 label="Confirm password"
                 autoComplete="new-password"
+                placeholder="Confirm password"
                 value={confirmPassword}
                 onChange={setConfirmPassword}
                 error={errors["confirmPassword"]}
@@ -513,7 +515,7 @@ function AuthPage() {
                 type="email"
                 inputMode="email"
                 autoComplete="email"
-                placeholder="you@company.com"
+                placeholder="Enter your email"
                 value={email}
                 error={errors["email"]}
                 onChange={(e) => setEmail(e.target.value)}

@@ -10,12 +10,13 @@ export async function getReport(req: Request, res: Response) {
   const from = parseDayStart(fromDate);
   const to = parseDayEnd(toDate);
 
-  const filter: Record<string, unknown> = { date: { $gte: from, $lte: to } };
+  const userId = req.authUser!.id;
+  const filter: Record<string, unknown> = { userId, date: { $gte: from, $lte: to } };
   if (vehicleId !== "all") filter.vehicleId = vehicleId;
 
   const [trips, vehicles] = await Promise.all([
     Trip.find(filter).sort({ date: 1, createdAt: 1 }).lean(),
-    Vehicle.find().lean(),
+    Vehicle.find({ userId }).lean(),
   ]);
 
   const vehicleName = new Map(vehicles.map((v) => [String(v._id), v.name]));

@@ -5,6 +5,7 @@ import * as vehicles from "../controllers/vehicleController";
 import * as trips from "../controllers/tripController";
 import * as reports from "../controllers/reportController";
 import * as settings from "../controllers/settingsController";
+import { requireAuth } from "../utils/auth";
 
 export const apiRouter = Router();
 
@@ -15,6 +16,8 @@ apiRouter.get("/health", (_req, res) => {
     data: { status: "ok", database: states[mongoose.connection.readyState] ?? "unknown" },
   });
 });
+
+apiRouter.use(requireAuth);
 
 // Vehicles
 apiRouter.get("/vehicles", asyncHandler(vehicles.listVehicles));

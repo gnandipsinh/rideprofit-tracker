@@ -16,7 +16,7 @@ npm run dev               # http://localhost:4000/api/health
 - Root directory: `server`
 - Build command: `npm install && npm run build`
 - Start command: `npm start`
-- Environment variables: `MONGODB_URI`, `PORT`, `CORS_ORIGIN`
+- Environment variables: `MONGODB_URI`, `PORT`, `CORS_ORIGIN`, `SUPABASE_URL`, and `SUPABASE_PUBLISHABLE_KEY`
 
 Set `CORS_ORIGIN` to your frontend origin (or `*` while testing).
 

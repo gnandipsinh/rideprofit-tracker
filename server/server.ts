@@ -9,13 +9,19 @@ import { errorHandler, notFoundHandler } from "./utils/http";
 
 const app = express();
 
-const origins = (process.env.CORS_ORIGIN ?? "*")
+const isProduction = process.env.NODE_ENV === "production";
+const configuredOrigins = process.env.CORS_ORIGIN?.trim();
+if (isProduction && (!configuredOrigins || configuredOrigins === "*")) {
+  throw new Error("CORS_ORIGIN must be an explicit frontend origin in production.");
+}
+
+const origins = (configuredOrigins ?? "http://localhost:5173,http://localhost:4173")
   .split(",")
   .map((o) => o.trim())
   .filter(Boolean);
 
 app.use(helmet());
-app.use(cors({ origin: origins.includes("*") ? true : origins, credentials: false }));
+app.use(cors({ origin: origins, credentials: false }));
 app.use(express.json({ limit: "1mb" }));
 app.use(morgan("tiny"));
 

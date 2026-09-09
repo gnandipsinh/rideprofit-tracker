@@ -81,7 +81,7 @@ export function downloadReportPdf(report: ReportPayload, appName: string, symbol
 
   /* ---------- trip table ---------- */
   const tableStart = cardY + cardH + 22;
-  const numeric = { halign: "right" as const };
+  const centered = { halign: "center" as const };
 
   autoTable(doc, {
     startY: tableStart,
@@ -108,24 +108,24 @@ export function downloadReportPdf(report: ReportPayload, appName: string, symbol
     },
     alternateRowStyles: { fillColor: [247, 247, 249] },
     columnStyles: {
-      0: { cellWidth: 56, halign: "left" },
-      1: { cellWidth: 76, halign: "left" },
-      2: { ...numeric },
-      3: { ...numeric },
-      4: { ...numeric },
-      5: { ...numeric },
-      6: { ...numeric },
-      7: { ...numeric },
-      8: { ...numeric, fontStyle: "bold" },
+      0: { cellWidth: 56, ...centered },
+      1: { ...centered },
+      2: { ...centered },
+      3: { ...centered },
+      4: { ...centered },
+      5: { ...centered },
+      6: { ...centered },
+      7: { ...centered, fontStyle: "bold" },
     },
-    head: [["Date", "Vehicle", "Income", "Diesel", "Driver", "Other", "EMI", "Expense", "Profit"]],
+    head: [["Date", "Income", "Diesel", "Driver", "Other", "EMI", "Expense", "Profit"]],
     body: report.rows.map((r) => [
       formatDateShort(r.date),
-      r.vehicleName,
       money(r.income),
       money(r.diesel),
       money(r.driverPayment),
-      money(r.otherExpenses),
+      (r.otherExpenseItems ?? [])
+        .map((item) => `${item.name} - ${money(item.amount)}`)
+        .join("\n") || money(r.otherExpenses),
       money(r.emiShare),
       money(r.totalExpense),
       money(r.profit),
@@ -133,7 +133,6 @@ export function downloadReportPdf(report: ReportPayload, appName: string, symbol
     foot: [
       [
         "TOTAL",
-        `${s.trips} trip(s)`,
         money(s.income),
         money(s.diesel),
         money(s.driverPayment),
@@ -148,12 +147,11 @@ export function downloadReportPdf(report: ReportPayload, appName: string, symbol
       fontStyle: "bold",
       fillColor: [24, 24, 27],
       textColor: [235, 205, 130],
-      halign: "right",
+      halign: "center",
       fontSize: 7.6,
     },
     didParseCell: (data) => {
-      if (data.section === "foot" && data.column.index < 2) data.cell.styles.halign = "left";
-      if (data.section === "head" && data.column.index < 2) data.cell.styles.halign = "left";
+      data.cell.styles.halign = "center";
     },
   });
 

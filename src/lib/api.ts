@@ -207,7 +207,9 @@ export const api = {
 
   report: async (params: { vehicleId: string; fromDate: string; toDate: string }): Promise<ReportPayload> => {
     const [vehicles, trips] = await Promise.all([api.listVehicles(), listTrips(params)]);
-    const names = new Map(vehicles.map((v) => [v._id, v.name]));
+    const names = new Map(
+      vehicles.map((v) => [v._id, v.vehicleNumber ? `${v.name} ${v.vehicleNumber}` : v.name]),
+    );
 
     const rows: ReportRow[] = [...trips]
       .sort((a, b) => a.date.localeCompare(b.date))
