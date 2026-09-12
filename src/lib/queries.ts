@@ -7,8 +7,10 @@ export const keys = {
   health: ["health"] as const,
   vehicles: ["vehicles"] as const,
   settings: ["settings"] as const,
-  trips: (params: { vehicleId?: string; fromDate?: string; toDate?: string }) => ["trips", params] as const,
-  report: (params: { vehicleId: string; fromDate: string; toDate: string }) => ["report", params] as const,
+  trips: (params: { vehicleId?: string; fromDate?: string; toDate?: string }) =>
+    ["trips", params] as const,
+  report: (params: { vehicleId: string; fromDate: string; toDate: string }) =>
+    ["report", params] as const,
 };
 
 function fail(error: unknown, fallback: string) {
@@ -32,7 +34,10 @@ export function useSettings() {
   return useQuery({ queryKey: keys.settings, queryFn: api.getSettings, retry: false });
 }
 
-export function useTrips(params: { vehicleId?: string; fromDate?: string; toDate?: string }, enabled = true) {
+export function useTrips(
+  params: { vehicleId?: string; fromDate?: string; toDate?: string },
+  enabled = true,
+) {
   return useQuery({
     queryKey: keys.trips(params),
     queryFn: () => api.listTrips(params),
@@ -41,7 +46,10 @@ export function useTrips(params: { vehicleId?: string; fromDate?: string; toDate
   });
 }
 
-export function useReport(params: { vehicleId: string; fromDate: string; toDate: string }, enabled = true) {
+export function useReport(
+  params: { vehicleId: string; fromDate: string; toDate: string },
+  enabled = true,
+) {
   return useQuery({
     queryKey: keys.report(params),
     queryFn: () => api.report(params),
@@ -79,7 +87,9 @@ export function useDeleteVehicle() {
     mutationFn: (id: string) => api.deleteVehicle(id),
     onSuccess: (data) => {
       invalidate();
-      toast.success(`Vehicle deleted${data.deletedTrips ? ` with ${data.deletedTrips} trip(s)` : ""}`);
+      toast.success(
+        `Vehicle deleted${data.deletedTrips ? ` with ${data.deletedTrips} trip(s)` : ""}`,
+      );
     },
     onError: (e) => fail(e, "Could not delete the vehicle"),
   });
@@ -113,8 +123,18 @@ export function useDeleteTrip() {
 export function useSaveSettings() {
   const invalidate = useInvalidateAll();
   return useMutation({
-    mutationFn: (payload: { appName: string; currency: string; defaultVehicleId: string | null }) =>
-      api.updateSettings(payload),
+    mutationFn: (payload: {
+      appName: string;
+      transportationName: string;
+      currency: string;
+      defaultVehicleId: string | null;
+      fullName: string;
+      mobileNumber: string;
+      businessName: string;
+      address: string;
+      contactNumber: string;
+      businessEmail: string;
+    }) => api.updateSettings(payload),
     onSuccess: () => {
       invalidate();
       toast.success("Settings saved");

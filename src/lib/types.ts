@@ -33,9 +33,16 @@ export interface Trip {
 export interface AppSettings {
   _id: string;
   appName: string;
+  transportationName: string;
   currency: string;
   defaultVehicleId: string | null;
   updatedAt: string;
+  fullName: string;
+  mobileNumber: string;
+  businessName: string;
+  address: string;
+  contactNumber: string;
+  businessEmail: string;
 }
 
 export interface ReportSummary {

@@ -18,7 +18,12 @@ function registerFont(doc: jsPDF): void {
 }
 
 function slug(value: string): string {
-  return value.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "vehicle";
+  return (
+    value
+      .replace(/[^a-z0-9]+/gi, "-")
+      .replace(/^-|-$/g, "")
+      .toLowerCase() || "vehicle"
+  );
 }
 
 /**
@@ -26,7 +31,7 @@ function slug(value: string): string {
  * the Reports screen. No calculations happen here — values come from the report
  * payload as-is.
  */
-export function downloadReportPdf(report: ReportPayload, appName: string, symbol = "₹"): void {
+export function downloadReportPdf(report: ReportPayload, companyName: string, symbol = "₹"): void {
   const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
   registerFont(doc);
 
@@ -42,17 +47,19 @@ export function downloadReportPdf(report: ReportPayload, appName: string, symbol
   doc.setFont(FONT, "bold");
   doc.setFontSize(16);
   doc.setTextColor(212, 175, 80);
-  doc.text(appName, MARGIN, 32);
+  doc.text(companyName || "Transport Company", pageWidth / 2, 30, { align: "center" });
 
   doc.setFont(FONT, "normal");
-  doc.setFontSize(9.5);
-  doc.setTextColor(232, 232, 238);
-  doc.text(`Vehicle: ${report.vehicleLabel}`, MARGIN, 52);
-  doc.text(`Period: ${formatDate(report.fromDate)} to ${formatDate(report.toDate)}`, MARGIN, 68);
-
   doc.setFontSize(8.5);
+  doc.setTextColor(232, 232, 238);
+  doc.text(`Vehicle: ${report.vehicleLabel}`, MARGIN, 53);
+  doc.text(`Period: ${formatDate(report.fromDate)} to ${formatDate(report.toDate)}`, MARGIN, 69);
+
+  doc.setFontSize(8);
   doc.setTextColor(190, 190, 200);
-  doc.text(`Generated: ${formatDate(new Date().toISOString())}`, pageWidth - MARGIN, 52, { align: "right" });
+  doc.text(`Generated: ${formatDate(new Date().toISOString())}`, pageWidth - MARGIN, 52, {
+    align: "right",
+  });
   doc.text(`${s.trips} trip(s)`, pageWidth - MARGIN, 68, { align: "right" });
 
   /* ---------- summary cards ---------- */
@@ -124,7 +131,7 @@ export function downloadReportPdf(report: ReportPayload, appName: string, symbol
       money(r.diesel),
       money(r.driverPayment),
       (r.otherExpenseItems ?? [])
-        .map((item) => `${item.name} - ${money(item.amount)}`)
+        .map((item) => `${item.name} — ${money(item.amount)}`)
         .join("\n") || money(r.otherExpenses),
       money(r.emiShare),
       money(r.totalExpense),
@@ -136,7 +143,7 @@ export function downloadReportPdf(report: ReportPayload, appName: string, symbol
         money(s.income),
         money(s.diesel),
         money(s.driverPayment),
-        money(s.otherExpenses),
+        `Total Other Expense — ${money(s.otherExpenses)}`,
         money(s.emiShare),
         money(s.totalExpense),
         money(s.profit),
@@ -162,11 +169,17 @@ export function downloadReportPdf(report: ReportPayload, appName: string, symbol
     doc.setFont(FONT, "normal");
     doc.setFontSize(7.5);
     doc.setTextColor(125, 125, 133);
-    doc.text(`${appName} · ${report.vehicleLabel}`, MARGIN, pageHeight - 20);
+    doc.text(
+      `${companyName || "Transport Company"} · ${report.vehicleLabel}`,
+      MARGIN,
+      pageHeight - 20,
+    );
     if (pages > 1) {
       doc.text(`Page ${i} of ${pages}`, pageWidth - MARGIN, pageHeight - 20, { align: "right" });
     }
   }
 
-  doc.save(`vehicle-report-${slug(report.vehicleLabel)}-${report.fromDate}-to-${report.toDate}.pdf`);
+  doc.save(
+    `vehicle-report-${slug(report.vehicleLabel)}-${report.fromDate}-to-${report.toDate}.pdf`,
+  );
 }

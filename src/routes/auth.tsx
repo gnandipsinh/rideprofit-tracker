@@ -1,6 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Eye, EyeOff, Loader2, Lock, Mail, Phone, ShieldCheck, Truck, User } from "lucide-react";
+import {
+  CheckCircle2,
+  Eye,
+  EyeOff,
+  Loader2,
+  Lock,
+  Mail,
+  MailOpen,
+  Phone,
+  ShieldCheck,
+  Truck,
+  User,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,23 +21,17 @@ import { supabase } from "@/integrations/supabase/client";
 import {
   GENERIC_CREDENTIALS_ERROR,
   GENERIC_ERROR,
-  GENERIC_OTP_ERROR,
-  MAX_OTP_ATTEMPTS,
-  OTP_LENGTH,
   RESEND_COOLDOWN_SECONDS,
   emailSchema,
   loginSchema,
-  otpSchema,
   registerSchema,
-  resendSignupOtp,
   resetSchema,
+  resendSignupEmail,
   safeAuthMessage,
-  sendRecoveryOtp,
-  verifyRecoveryOtp,
-  verifySignupOtp,
+  sendLoginLink,
+  sendRecoveryEmail,
 } from "@/lib/auth";
 import { cn } from "@/lib/utils";
-
 
 export const Route = createFileRoute("/auth")({
   head: () => ({
@@ -47,8 +53,8 @@ export const Route = createFileRoute("/auth")({
   component: AuthPage,
 });
 
-type Step = "login" | "register" | "otp" | "forgot" | "reset";
-type OtpPurpose = "register" | "reset";
+type Step = "login" | "register" | "email-login" | "email-link" | "forgot" | "reset";
+type EmailLinkPurpose = "login" | "register" | "reset";
 
 type Errors = Record<string, string>;
 
@@ -127,6 +133,7 @@ function AuthPage() {
 
   const [step, setStep] = useState<Step>("login");
   const [busy, setBusy] = useState(false);
+  const requestInFlight = useRef(false);
   const [errors, setErrors] = useState<Errors>({});
   const [formError, setFormError] = useState("");
 
@@ -136,9 +143,7 @@ function AuthPage() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
 
-  const [otp, setOtp] = useState("");
-  const [otpPurpose, setOtpPurpose] = useState<OtpPurpose>("register");
-  const [otpAttempts, setOtpAttempts] = useState(0);
+  const [emailLinkPurpose, setEmailLinkPurpose] = useState<EmailLinkPurpose>("login");
   const [cooldown, setCooldown] = useState(0);
 
   useEffect(() => {
@@ -147,16 +152,20 @@ function AuthPage() {
     return () => clearTimeout(t);
   }, [cooldown]);
 
-  const maskedEmail = useMemo(() => {
-    const [local = "", domain = ""] = email.split("@");
-    const head = local.slice(0, 2);
-    return `${head}${"*".repeat(Math.max(local.length - 2, 2))}@${domain}`;
-  }, [email]);
+  useEffect(() => {
+    const { data } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY") {
+        setStep("reset");
+      } else if (event === "SIGNED_IN") {
+        navigate({ to: "/", replace: true });
+      }
+    });
+    return () => data.subscription.unsubscribe();
+  }, [navigate]);
 
   function reset(next: Step) {
     setErrors({});
     setFormError("");
-    setOtp("");
     setStep(next);
   }
 
@@ -169,21 +178,6 @@ function AuthPage() {
     return out;
   }
 
-  async function startOtp(purpose: OtpPurpose, targetEmail: string) {
-    const res = purpose === "reset" ? await sendRecoveryOtp(targetEmail) : await resendSignupOtp(targetEmail);
-    if (res.error) {
-      setFormError(safeAuthMessage(res.error.message));
-      return false;
-    }
-    setOtpPurpose(purpose);
-    setOtpAttempts(0);
-    setCooldown(RESEND_COOLDOWN_SECONDS);
-    reset("otp");
-    setOtpPurpose(purpose);
-    toast.success(`Verification code sent to ${targetEmail}`);
-    return true;
-  }
-
   async function handleRegister(e: React.FormEvent) {
     e.preventDefault();
     setErrors({});
@@ -193,6 +187,8 @@ function AuthPage() {
       setErrors(zodErrors(parsed.error.issues));
       return;
     }
+    if (requestInFlight.current) return;
+    requestInFlight.current = true;
     setBusy(true);
     try {
       const { error } = await supabase.auth.signUp({
@@ -208,22 +204,49 @@ function AuthPage() {
       }
       setPassword("");
       setConfirmPassword("");
-      // Sign-up already emails a 6-digit code — do not send a second one (rate limit).
-      setOtpAttempts(0);
+      setEmailLinkPurpose("register");
       setCooldown(RESEND_COOLDOWN_SECONDS);
-      reset("otp");
-      setOtpPurpose("register");
-      toast.success(`Verification code sent to ${parsed.data.email}`);
+      reset("email-link");
+      toast.success(`Confirmation link sent to ${parsed.data.email}`);
     } catch {
       setFormError(GENERIC_ERROR);
     } finally {
+      requestInFlight.current = false;
       setBusy(false);
     }
   }
 
+  async function handleLoginLink(e: React.FormEvent) {
+    e.preventDefault();
+    setErrors({});
+    setFormError("");
+    const parsed = emailSchema.safeParse(email);
+    if (!parsed.success) {
+      setErrors({ email: parsed.error.issues[0]?.message ?? "Enter a valid email" });
+      return;
+    }
+    if (requestInFlight.current) return;
+    requestInFlight.current = true;
+    setBusy(true);
+    try {
+      const { error } = await sendLoginLink(parsed.data);
+      if (error) {
+        setFormError(safeAuthMessage(error.message));
+        return;
+      }
+      setEmailLinkPurpose("login");
+      setCooldown(RESEND_COOLDOWN_SECONDS);
+      reset("email-link");
+      toast.success("Login link sent");
+    } catch {
+      setFormError(GENERIC_ERROR);
+    } finally {
+      requestInFlight.current = false;
+      setBusy(false);
+    }
+  }
 
   async function handleLogin(e: React.FormEvent) {
-
     e.preventDefault();
     setErrors({});
     setFormError("");
@@ -232,6 +255,8 @@ function AuthPage() {
       setErrors(zodErrors(parsed.error.issues));
       return;
     }
+    if (requestInFlight.current) return;
+    requestInFlight.current = true;
     setBusy(true);
     try {
       const { error } = await supabase.auth.signInWithPassword({
@@ -248,6 +273,7 @@ function AuthPage() {
     } catch {
       setFormError(GENERIC_ERROR);
     } finally {
+      requestInFlight.current = false;
       setBusy(false);
     }
   }
@@ -262,76 +288,45 @@ function AuthPage() {
       return;
     }
     setBusy(true);
-    try {
-      await startOtp("reset", parsed.data);
-    } finally {
+    if (requestInFlight.current) {
       setBusy(false);
-    }
-  }
-
-  async function handleVerify(e: React.FormEvent) {
-    e.preventDefault();
-    setErrors({});
-    setFormError("");
-    const parsed = otpSchema.safeParse(otp);
-    if (!parsed.success) {
-      setErrors({ otp: parsed.error.issues[0]?.message ?? "Invalid code" });
       return;
     }
-    setBusy(true);
+    requestInFlight.current = true;
     try {
-      const res =
-        otpPurpose === "reset"
-          ? await verifyRecoveryOtp(email, parsed.data)
-          : otpPurpose === "register"
-            ? await verifySignupOtp(email, parsed.data)
-            : await verifySignupOtp(email, parsed.data);
-      if (res.error) {
-        const attempts = otpAttempts + 1;
-        setOtpAttempts(attempts);
-        if (attempts >= MAX_OTP_ATTEMPTS) {
-          toast.error("Too many incorrect codes. Please sign in again.");
-          setOtp("");
-          reset("login");
-          return;
-        }
-        setFormError(`${GENERIC_OTP_ERROR} ${MAX_OTP_ATTEMPTS - attempts} attempt(s) left.`);
-        return;
+      const { error } = await sendRecoveryEmail(parsed.data);
+      if (error) setFormError(safeAuthMessage(error.message));
+      else {
+        setEmailLinkPurpose("reset");
+        setCooldown(RESEND_COOLDOWN_SECONDS);
+        reset("email-link");
+        toast.success("Password reset link sent");
       }
-      if (otpPurpose === "reset") {
-        reset("reset");
-        return;
-      }
-      // Wait for the session to be persisted before entering the protected area.
-      await supabase.auth.getUser();
-      toast.success(otpPurpose === "register" ? "Account verified. Welcome!" : "Signed in successfully");
-      navigate({ to: "/", replace: true });
-
-    } catch {
-      setFormError(GENERIC_ERROR);
     } finally {
+      requestInFlight.current = false;
       setBusy(false);
     }
   }
 
   async function handleResend() {
-    if (cooldown > 0) return;
+    if (cooldown > 0 || requestInFlight.current) return;
+    requestInFlight.current = true;
     setBusy(true);
     try {
-      let res;
-      if (otpPurpose === "reset") {
-        res = await sendRecoveryOtp(email);
-      } else if (otpPurpose === "register") {
-        res = await resendSignupOtp(email);
-      }
+      const res =
+        emailLinkPurpose === "reset"
+          ? await sendRecoveryEmail(email)
+          : emailLinkPurpose === "register"
+            ? await resendSignupEmail(email)
+            : await sendLoginLink(email);
       if (res.error) {
         setFormError(safeAuthMessage(res.error.message));
         return;
       }
       setCooldown(RESEND_COOLDOWN_SECONDS);
-      setOtp("");
-      toast.success("A new code is on its way");
+      toast.success("A new login link is on its way");
     } finally {
+      requestInFlight.current = false;
       setBusy(false);
     }
   }
@@ -365,10 +360,26 @@ function AuthPage() {
 
   const heading: Record<Step, { title: string; sub: string }> = {
     login: { title: "Welcome back", sub: "Sign in securely with your password." },
-    register: { title: "Create your account", sub: "We'll email a 6-digit code to activate your account." },
-    otp: { title: "Email verification", sub: `Enter the ${OTP_LENGTH}-digit code sent to ${maskedEmail}` },
-    forgot: { title: "Forgot password", sub: "We'll email you a code to reset your password." },
-    reset: { title: "Set a new password", sub: "Choose a strong password you haven't used before." },
+    register: {
+      title: "Create your account",
+      sub: "We'll email a confirmation link to activate your account.",
+    },
+    "email-login": {
+      title: "Login with email",
+      sub: "We'll send a secure login link to your registered email.",
+    },
+    "email-link": {
+      title: "Check your registered email",
+      sub: "We've sent a login link to your registered email. Please check your inbox and click the link to continue.",
+    },
+    forgot: {
+      title: "Forgot password",
+      sub: "We'll email you a secure link to reset your password.",
+    },
+    reset: {
+      title: "Set a new password",
+      sub: "Choose a strong password you haven't used before.",
+    },
   };
 
   return (
@@ -426,16 +437,66 @@ function AuthPage() {
                 Forgot password?
               </button>
               <Button type="submit" disabled={busy} className="h-12 w-full text-sm font-bold">
-                {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
+                {busy ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <ShieldCheck className="mr-2 h-4 w-4" />
+                )}
                 Login
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={busy}
+                onClick={() => reset("email-login")}
+                className="h-12 w-full text-sm font-bold"
+              >
+                <Mail className="mr-2 h-4 w-4" /> Login with email link
               </Button>
               <p className="text-center text-xs text-muted-foreground">
                 New here?{" "}
-                <button type="button" onClick={() => reset("register")} className="font-semibold text-primary hover:underline">
+                <button
+                  type="button"
+                  onClick={() => reset("register")}
+                  className="font-semibold text-primary hover:underline"
+                >
                   Create an account
                 </button>
               </p>
+            </form>
+          ) : null}
 
+          {step === "email-login" ? (
+            <form onSubmit={handleLoginLink} className="space-y-4">
+              <Field
+                id="email-login-email"
+                label="Registered email"
+                icon={Mail}
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                placeholder="you@company.com"
+                value={email}
+                error={errors["email"]}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+              <Button type="submit" disabled={busy} className="h-12 w-full text-sm font-bold">
+                {busy ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Mail className="mr-2 h-4 w-4" />
+                )}
+                Send Login Email
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={busy}
+                onClick={() => reset("login")}
+                className="h-12 w-full text-sm font-bold"
+              >
+                Back to Login
+              </Button>
             </form>
           ) : null}
 
@@ -499,7 +560,11 @@ function AuthPage() {
               </Button>
               <p className="text-center text-xs text-muted-foreground">
                 Already registered?{" "}
-                <button type="button" onClick={() => reset("login")} className="font-semibold text-primary hover:underline">
+                <button
+                  type="button"
+                  onClick={() => reset("login")}
+                  className="font-semibold text-primary hover:underline"
+                >
                   Sign in
                 </button>
               </p>
@@ -522,58 +587,61 @@ function AuthPage() {
               />
               <Button type="submit" disabled={busy} className="h-12 w-full text-sm font-bold">
                 {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                Send reset code
+                Send reset link
               </Button>
               <p className="text-center text-xs text-muted-foreground">
-                <button type="button" onClick={() => reset("login")} className="font-semibold text-primary hover:underline">
+                <button
+                  type="button"
+                  onClick={() => reset("login")}
+                  className="font-semibold text-primary hover:underline"
+                >
                   Back to sign in
                 </button>
               </p>
             </form>
           ) : null}
 
-          {step === "otp" ? (
-            <form onSubmit={handleVerify} className="space-y-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="otp">Verification code</Label>
-                <Input
-                  id="otp"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  maxLength={OTP_LENGTH}
-                  placeholder="000000"
-                  value={otp}
-                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, OTP_LENGTH))}
-                  className={cn(
-                    "h-14 text-center text-2xl font-bold tracking-[0.6em]",
-                    errors["otp"] && "border-destructive",
-                  )}
-                />
-                {errors["otp"] ? <p className="text-xs font-medium text-destructive">{errors["otp"]}</p> : null}
-                <p className="text-xs text-muted-foreground">The code expires in 5 minutes.</p>
+          {step === "email-link" ? (
+            <div className="space-y-4 text-center">
+              <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-primary/15 text-primary">
+                <MailOpen className="h-8 w-8" />
               </div>
-              <Button type="submit" disabled={busy} className="h-12 w-full text-sm font-bold">
-                {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ShieldCheck className="mr-2 h-4 w-4" />}
-                Verify & continue
+              <p className="text-sm text-muted-foreground">
+                {emailLinkPurpose === "reset"
+                  ? "We've sent a password reset link to your registered email. Please check your inbox and click the link to continue."
+                  : emailLinkPurpose === "register"
+                    ? "We've sent a confirmation link to your registered email. Please check your inbox and click the link to continue."
+                    : "We've sent a login link to your registered email. Please check your inbox and click the link to continue."}
+              </p>
+              <Button
+                type="button"
+                disabled={cooldown > 0 || busy}
+                onClick={handleResend}
+                className="h-12 w-full text-sm font-bold"
+              >
+                {busy ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="mr-2 h-4 w-4" />
+                )}
+                {cooldown > 0
+                  ? `${emailLinkPurpose === "reset" ? "Resend Reset Email" : "Resend Login Email"} in ${cooldown}s`
+                  : emailLinkPurpose === "reset"
+                    ? "Resend Reset Email"
+                    : emailLinkPurpose === "register"
+                      ? "Resend Confirmation Email"
+                      : "Resend Login Email"}
               </Button>
-              <div className="flex items-center justify-between text-xs">
-                <button
-                  type="button"
-                  disabled={cooldown > 0 || busy}
-                  onClick={handleResend}
-                  className="font-semibold text-primary hover:underline disabled:text-muted-foreground disabled:no-underline"
-                >
-                  {cooldown > 0 ? `Resend code in ${cooldown}s` : "Resend code"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => reset("login")}
-                  className="font-semibold text-muted-foreground hover:text-foreground"
-                >
-                  Use another account
-                </button>
-              </div>
-            </form>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={busy}
+                onClick={() => reset("login")}
+                className="h-12 w-full text-sm font-bold"
+              >
+                Back to Login
+              </Button>
+            </div>
           ) : null}
 
           {step === "reset" ? (
@@ -603,7 +671,8 @@ function AuthPage() {
         </div>
 
         <p className="mt-5 text-center text-[0.7rem] leading-relaxed text-muted-foreground">
-          Protected by two-step email verification. Passwords are hashed and never stored in plain text.
+          Protected by two-step email verification. Passwords are hashed and never stored in plain
+          text.
         </p>
       </div>
     </div>

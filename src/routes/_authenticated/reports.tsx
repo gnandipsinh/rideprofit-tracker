@@ -26,7 +26,8 @@ export const Route = createFileRoute("/_authenticated/reports")({
       { property: "og:title", content: "Reports — Vehicle Profit & Expense Report" },
       {
         property: "og:description",
-        content: "Date-range trip reports with income, expenses, EMI share, net profit and PDF export.",
+        content:
+          "Date-range trip reports with income, expenses, EMI share, net profit and PDF export.",
       },
     ],
   }),
@@ -34,7 +35,7 @@ export const Route = createFileRoute("/_authenticated/reports")({
 });
 
 function ReportsPage() {
-  const { symbol, appName, selectedVehicleId, vehicles, vehiclesLoading } = useApp();
+  const { symbol, appName, settings, selectedVehicleId, vehicles, vehiclesLoading } = useApp();
   const [preset, setPreset] = useState<ReportPreset>("1m");
   const [custom, setCustom] = useState({ fromDate: todayInput(), toDate: todayInput() });
 
@@ -52,7 +53,9 @@ function ReportsPage() {
       <div className="space-y-4">
         <div className="space-y-1">
           <h2 className="text-lg font-bold">Reports</h2>
-          <p className="text-xs text-muted-foreground">Vehicle-wise profit statement for any period</p>
+          <p className="text-xs text-muted-foreground">
+            Vehicle-wise profit statement for any period
+          </p>
         </div>
 
         <VehicleSelector />
@@ -112,19 +115,24 @@ function ReportsPage() {
                 <div className="min-w-0">
                   <p className="truncate text-sm font-bold">{report.vehicleLabel}</p>
                   <p className="text-xs text-muted-foreground">
-                    {formatDateShort(report.fromDate)} – {formatDateShort(report.toDate)} · {report.summary.trips}{" "}
-                    trip(s)
+                    {formatDateShort(report.fromDate)} – {formatDateShort(report.toDate)} ·{" "}
+                    {report.summary.trips} trip(s)
                   </p>
                 </div>
                 <Button
-                  onClick={() => downloadReportPdf(report, appName, symbol)}
+                  onClick={() =>
+                    downloadReportPdf(
+                      report,
+                      settings?.transportationName || settings?.businessName || appName,
+                      symbol,
+                    )
+                  }
                   className="h-11 shrink-0 rounded-xl px-4 font-semibold"
                 >
                   <Download className="mr-1.5 h-4 w-4" />
                   <span className="hidden sm:inline">Download Report</span>
                   <span className="sm:hidden">PDF</span>
                 </Button>
-
               </div>
 
               <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -141,7 +149,8 @@ function ReportsPage() {
                     <dd
                       className={cn(
                         "mt-1 text-sm font-bold",
-                        item.label === "Net Profit" && (item.value >= 0 ? "text-primary" : "text-destructive"),
+                        item.label === "Net Profit" &&
+                          (item.value >= 0 ? "text-primary" : "text-destructive"),
                       )}
                     >
                       {money(item.value)}
@@ -171,13 +180,27 @@ function ReportsPage() {
                     {report.rows.map((row) => (
                       <tr key={row._id} className="border-t border-border/60">
                         <td className="whitespace-nowrap px-3 py-3">{formatDateShort(row.date)}</td>
-                        <td className="max-w-[10rem] truncate px-3 py-3 text-muted-foreground">{row.vehicleName}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-right">{money(row.income)}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-right">{money(row.diesel)}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-right">{money(row.driverPayment)}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-right">{money(row.otherExpenses)}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-right">{money(row.emiShare)}</td>
-                        <td className="whitespace-nowrap px-3 py-3 text-right">{money(row.totalExpense)}</td>
+                        <td className="max-w-[10rem] truncate px-3 py-3 text-muted-foreground">
+                          {row.vehicleName}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3 text-right">
+                          {money(row.income)}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3 text-right">
+                          {money(row.diesel)}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3 text-right">
+                          {money(row.driverPayment)}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3 text-right">
+                          {money(row.otherExpenses)}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3 text-right">
+                          {money(row.emiShare)}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-3 text-right">
+                          {money(row.totalExpense)}
+                        </td>
                         <td
                           className={cn(
                             "whitespace-nowrap px-3 py-3 text-right font-semibold",
@@ -194,12 +217,24 @@ function ReportsPage() {
                       <td className="px-3 py-3" colSpan={2}>
                         Total
                       </td>
-                      <td className="whitespace-nowrap px-3 py-3 text-right">{money(report.summary.income)}</td>
-                      <td className="whitespace-nowrap px-3 py-3 text-right">{money(report.summary.diesel)}</td>
-                      <td className="whitespace-nowrap px-3 py-3 text-right">{money(report.summary.driverPayment)}</td>
-                      <td className="whitespace-nowrap px-3 py-3 text-right">{money(report.summary.otherExpenses)}</td>
-                      <td className="whitespace-nowrap px-3 py-3 text-right">{money(report.summary.emiShare)}</td>
-                      <td className="whitespace-nowrap px-3 py-3 text-right">{money(report.summary.totalExpense)}</td>
+                      <td className="whitespace-nowrap px-3 py-3 text-right">
+                        {money(report.summary.income)}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-3 text-right">
+                        {money(report.summary.diesel)}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-3 text-right">
+                        {money(report.summary.driverPayment)}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-3 text-right">
+                        {money(report.summary.otherExpenses)}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-3 text-right">
+                        {money(report.summary.emiShare)}
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-3 text-right">
+                        {money(report.summary.totalExpense)}
+                      </td>
                       <td
                         className={cn(
                           "whitespace-nowrap px-3 py-3 text-right",

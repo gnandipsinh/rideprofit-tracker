@@ -1,9 +1,7 @@
 import { z } from "zod";
 import { supabase } from "@/integrations/supabase/client";
 
-export const OTP_LENGTH = 6;
 export const RESEND_COOLDOWN_SECONDS = 60;
-export const MAX_OTP_ATTEMPTS = 5;
 
 export const emailSchema = z
   .string()
@@ -47,14 +45,8 @@ export const resetSchema = z
     message: "Passwords do not match",
   });
 
-export const otpSchema = z
-  .string()
-  .trim()
-  .regex(new RegExp(`^\\d{${OTP_LENGTH}}$`), `Enter the ${OTP_LENGTH}-digit code`);
-
 /** Generic messages only — never leak whether an account exists or why auth failed. */
 export const GENERIC_CREDENTIALS_ERROR = "Incorrect email or password. Please try again.";
-export const GENERIC_OTP_ERROR = "That code is invalid or has expired. Request a new one.";
 export const GENERIC_ERROR = "Something went wrong. Please try again in a moment.";
 
 export function safeAuthMessage(raw: string | undefined, fallback = GENERIC_ERROR): string {
@@ -71,22 +63,19 @@ export function safeAuthMessage(raw: string | undefined, fallback = GENERIC_ERRO
   return fallback;
 }
 
-/** Sends a password-recovery one-time code. */
-export async function sendRecoveryOtp(email: string) {
-  return supabase.auth.resetPasswordForEmail(email);
+export async function sendLoginLink(email: string) {
+  return supabase.auth.signInWithOtp({
+    email,
+    options: { shouldCreateUser: false, emailRedirectTo: `${window.location.origin}/auth` },
+  });
 }
 
-export async function resendSignupOtp(email: string) {
+export async function resendSignupEmail(email: string) {
   return supabase.auth.resend({ type: "signup", email });
 }
 
-/** Verifies the code emailed right after registration. */
-export async function verifySignupOtp(email: string, token: string) {
-  const res = await supabase.auth.verifyOtp({ email, token, type: "signup" });
-  if (!res.error) return res;
-  return supabase.auth.verifyOtp({ email, token, type: "email" });
-}
-
-export async function verifyRecoveryOtp(email: string, token: string) {
-  return supabase.auth.verifyOtp({ email, token, type: "recovery" });
+export async function sendRecoveryEmail(email: string) {
+  return supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${window.location.origin}/auth`,
+  });
 }
