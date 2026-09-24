@@ -39,7 +39,20 @@ export function formatDate(value: string | Date): string {
   const iso = typeof value === "string" ? value : value.toISOString();
   const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
   if (!y || !m || !d) return String(value);
-  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const months = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
   return `${String(d).padStart(2, "0")} ${months[m - 1]} ${y}`;
 }
 
@@ -53,7 +66,9 @@ export function formatDateShort(value: string | Date): string {
 
 /** Date -> "YYYY-MM-DD" using UTC parts so the day never shifts. */
 export function toDateInput(date: Date): string {
-  return new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())).toISOString().slice(0, 10);
+  return new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
+    .toISOString()
+    .slice(0, 10);
 }
 
 export function todayInput(): string {

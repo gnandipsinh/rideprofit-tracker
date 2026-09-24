@@ -83,7 +83,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { title: "Vehicle Calculation System" },
       {
         name: "description",
-        content: "Vehicle-wise trip accounting: income, diesel, driver payment, EMI share, profit and PDF reports.",
+        content:
+          "Vehicle-wise trip accounting: income, diesel, driver payment, EMI share, profit and PDF reports.",
       },
       { property: "og:title", content: "Vehicle Calculation System" },
       {
@@ -99,7 +100,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         rel: "stylesheet",
         href: appCss,
       },
-      { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
+      { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
     ],
   }),
   shellComponent: RootShell,

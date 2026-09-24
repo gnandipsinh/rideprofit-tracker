@@ -5,6 +5,7 @@ export interface Vehicle {
   model: string;
   vehicleNumber: string;
   notes: string;
+  isActive: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -77,6 +78,7 @@ export interface VehiclePayload {
   model: string;
   vehicleNumber: string;
   notes: string;
+  isActive: boolean;
 }
 
 export interface TripPayload {

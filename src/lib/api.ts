@@ -24,6 +24,27 @@ function fail(error: { message: string } | null): never {
   throw new ApiError(error?.message ?? "Something went wrong with the database request");
 }
 
+function sanitizeString(input: string, maxLength = 255): string {
+  return input.trim().slice(0, maxLength).replace(/[<>]/g, "");
+}
+
+function sanitizeEmail(input: string): string {
+  return sanitizeString(input).toLowerCase().slice(0, 255);
+}
+
+function sanitizeNumber(input: string, maxLength = 20): string {
+  return input.trim().replace(/\D/g, "").slice(0, maxLength);
+}
+
+export { sanitizeString, sanitizeEmail, sanitizeNumber };
+
+async function getCurrentUserId(): Promise<string | null> {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  return user?.id ?? null;
+}
+
 /* ---------------- row mappers ---------------- */
 
 interface VehicleRow {
@@ -33,8 +54,10 @@ interface VehicleRow {
   model: string;
   vehicle_number: string;
   notes: string;
+  is_active?: boolean;
   created_at: string;
   updated_at: string;
+  user_id: string;
 }
 
 interface TripRow {
@@ -49,6 +72,7 @@ interface TripRow {
   notes: string;
   created_at: string;
   updated_at: string;
+  user_id: string;
 }
 
 interface SettingsRow {
@@ -64,10 +88,78 @@ interface SettingsRow {
   address?: string;
   contact_number?: string;
   business_email?: string;
+  user_id: string;
 }
 
 function isMissingSettingsColumn(error: { code?: string; message?: string } | null): boolean {
   return error?.code === "PGRST204" || error?.message?.includes("column") === true;
+}
+
+interface SettingsProfileCache {
+  transportation_name?: string;
+  full_name?: string;
+  mobile_number?: string;
+  business_name?: string;
+  address?: string;
+  contact_number?: string;
+  business_email?: string;
+}
+
+function profileCacheKey(userId: string): string {
+  return `vcs.settings.profile.${userId}`;
+}
+
+function readProfileCache(userId: string): SettingsProfileCache {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(profileCacheKey(userId));
+    return raw ? (JSON.parse(raw) as SettingsProfileCache) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeProfileCache(userId: string, fields: SettingsProfileCache): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(profileCacheKey(userId), JSON.stringify(fields));
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
+function vehicleStatusCacheKey(userId: string): string {
+  return `vcs.vehicleStatus.${userId}`;
+}
+
+function readVehicleStatusCache(userId: string): Record<string, boolean> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(vehicleStatusCacheKey(userId));
+    return raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeVehicleStatusOverride(userId: string, id: string, isActive: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    const map = readVehicleStatusCache(userId);
+    map[id] = isActive;
+    window.localStorage.setItem(vehicleStatusCacheKey(userId), JSON.stringify(map));
+  } catch {
+    /* ignore */
+  }
+}
+
+function isMissingIsActiveColumn(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  const msg = (error.message ?? "").toLowerCase();
+  if (!msg.includes("is_active")) return false;
+  return (
+    error.code === "PGRST204" || msg.includes("schema cache") || msg.includes("could not find")
+  );
 }
 
 function toVehicle(r: VehicleRow): Vehicle {
@@ -78,6 +170,7 @@ function toVehicle(r: VehicleRow): Vehicle {
     model: r.model,
     vehicleNumber: r.vehicle_number,
     notes: r.notes,
+    isActive: typeof r.is_active === "boolean" ? r.is_active : true,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -125,30 +218,49 @@ function toSettings(r: SettingsRow): AppSettings {
   };
 }
 
-function tripInsert(payload: TripPayload) {
+function tripInsert(payload: TripPayload, userId: string) {
   const items = payload.otherExpenseItems
     .filter((i) => i.name.trim() || Number(i.amount) > 0)
-    .map((i) => ({ name: i.name.trim() || "Other", amount: Number(i.amount) || 0 }));
+    .map((i) => ({ name: sanitizeString(i.name), amount: Number(i.amount) || 0 }));
   return {
     vehicle_id: payload.vehicleId,
+    user_id: userId,
     date: payload.date,
     income: Number(payload.income) || 0,
     diesel: Number(payload.diesel) || 0,
     driver_payment: Number(payload.driverPayment) || 0,
     emi_share: Number(payload.emiShare) || 0,
     other_expense_items: items,
-    notes: payload.notes ?? "",
+    notes: sanitizeString(payload.notes ?? ""),
   };
 }
 
-function vehicleInsert(payload: VehiclePayload) {
-  return {
-    name: payload.name.trim(),
-    type: payload.type,
-    model: payload.model ?? "",
-    vehicle_number: payload.vehicleNumber ?? "",
-    notes: payload.notes ?? "",
+function vehicleInsert(payload: VehiclePayload, userId: string, includeIsActive = true) {
+  const row = {
+    name: sanitizeString(payload.name),
+    type: sanitizeString(payload.type),
+    model: sanitizeString(payload.model ?? ""),
+    vehicle_number: sanitizeString(payload.vehicleNumber ?? ""),
+    notes: sanitizeString(payload.notes ?? ""),
+    user_id: userId,
+    ...(includeIsActive ? { is_active: payload.isActive ?? true } : {}),
   };
+  return row;
+}
+
+type VehicleWriteResult = {
+  data: unknown;
+  error: { code?: string; message: string } | null;
+};
+
+async function runVehicleWrite(
+  build: (includeIsActive: boolean) => PromiseLike<VehicleWriteResult>,
+): Promise<VehicleWriteResult> {
+  const first = await build(true);
+  if (first.error && isMissingIsActiveColumn(first.error)) {
+    return build(false);
+  }
+  return first;
 }
 
 /* ---------------- api ---------------- */
@@ -158,9 +270,12 @@ async function listTrips(params: {
   fromDate?: string;
   toDate?: string;
 }): Promise<Trip[]> {
+  const userId = await getCurrentUserId();
+  if (!userId) return [];
   let q = supabase
     .from("trips")
     .select("*")
+    .eq("user_id", userId)
     .order("date", { ascending: false })
     .order("created_at", { ascending: false });
   if (params.vehicleId && params.vehicleId !== ALL_VEHICLES)
@@ -180,51 +295,92 @@ export const api = {
   },
 
   listVehicles: async (): Promise<Vehicle[]> => {
+    const userId = await getCurrentUserId();
+    if (!userId) return [];
     const { data, error } = await supabase
       .from("vehicles")
       .select("*")
+      .eq("user_id", userId)
       .order("created_at", { ascending: true });
     if (error) fail(error);
-    return (data as VehicleRow[]).map(toVehicle);
+    const statusCache = readVehicleStatusCache(userId);
+    return (data as VehicleRow[]).map((row) => {
+      const v = toVehicle(row);
+      const cached = statusCache[v._id];
+      return typeof cached === "boolean" ? { ...v, isActive: cached } : v;
+    });
   },
 
   createVehicle: async (payload: VehiclePayload): Promise<Vehicle> => {
-    const { data, error } = await supabase
-      .from("vehicles")
-      .insert(vehicleInsert(payload))
-      .select("*")
-      .single();
+    const userId = await getCurrentUserId();
+    if (!userId) throw new ApiError("Authentication required");
+    const { data, error } = await runVehicleWrite((includeIsActive) =>
+      supabase
+        .from("vehicles")
+        .insert(vehicleInsert(payload, userId, includeIsActive))
+        .select("*")
+        .single(),
+    );
     if (error) fail(error);
     return toVehicle(data as VehicleRow);
   },
 
   updateVehicle: async (id: string, payload: VehiclePayload): Promise<Vehicle> => {
-    const { data, error } = await supabase
-      .from("vehicles")
-      .update(vehicleInsert(payload))
-      .eq("id", id)
-      .select("*")
-      .single();
+    const userId = await getCurrentUserId();
+    if (!userId) throw new ApiError("Authentication required");
+    const { data, error } = await runVehicleWrite((includeIsActive) =>
+      supabase
+        .from("vehicles")
+        .update(vehicleInsert(payload, userId, includeIsActive))
+        .eq("id", id)
+        .eq("user_id", userId)
+        .select("*")
+        .single(),
+    );
     if (error) fail(error);
     return toVehicle(data as VehicleRow);
   },
 
   deleteVehicle: async (id: string): Promise<{ deletedTrips: number }> => {
+    const userId = await getCurrentUserId();
+    if (!userId) throw new ApiError("Authentication required");
     const { count } = await supabase
       .from("trips")
       .select("id", { count: "exact", head: true })
-      .eq("vehicle_id", id);
-    const { error } = await supabase.from("vehicles").delete().eq("id", id);
+      .eq("vehicle_id", id)
+      .eq("user_id", userId);
+    const { error } = await supabase.from("vehicles").delete().eq("id", id).eq("user_id", userId);
     if (error) fail(error);
     return { deletedTrips: count ?? 0 };
+  },
+
+  toggleVehicleStatus: async (id: string, isActive: boolean): Promise<void> => {
+    const userId = await getCurrentUserId();
+    if (!userId) throw new ApiError("Authentication required");
+    const { error } = await supabase
+      .from("vehicles")
+      .update(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        { is_active: isActive } as any,
+      )
+      .eq("id", id)
+      .eq("user_id", userId);
+    if (error && isMissingIsActiveColumn(error)) {
+      writeVehicleStatusOverride(userId, id, isActive);
+      return;
+    }
+    if (error) fail(error);
+    writeVehicleStatusOverride(userId, id, isActive);
   },
 
   listTrips,
 
   createTrip: async (payload: TripPayload): Promise<Trip> => {
+    const userId = await getCurrentUserId();
+    if (!userId) throw new ApiError("Authentication required");
     const { data, error } = await supabase
       .from("trips")
-      .insert(tripInsert(payload))
+      .insert(tripInsert(payload, userId))
       .select("*")
       .single();
     if (error) fail(error);
@@ -232,10 +388,13 @@ export const api = {
   },
 
   updateTrip: async (id: string, payload: TripPayload): Promise<Trip> => {
+    const userId = await getCurrentUserId();
+    if (!userId) throw new ApiError("Authentication required");
     const { data, error } = await supabase
       .from("trips")
-      .update(tripInsert(payload))
+      .update(tripInsert(payload, userId))
       .eq("id", id)
+      .eq("user_id", userId)
       .select("*")
       .single();
     if (error) fail(error);
@@ -243,7 +402,9 @@ export const api = {
   },
 
   deleteTrip: async (id: string): Promise<{ _id: string }> => {
-    const { error } = await supabase.from("trips").delete().eq("id", id);
+    const userId = await getCurrentUserId();
+    if (!userId) throw new ApiError("Authentication required");
+    const { error } = await supabase.from("trips").delete().eq("id", id).eq("user_id", userId);
     if (error) fail(error);
     return { _id: id };
   },
@@ -255,7 +416,10 @@ export const api = {
   }): Promise<ReportPayload> => {
     const [vehicles, trips] = await Promise.all([api.listVehicles(), listTrips(params)]);
     const names = new Map(
-      vehicles.map((v) => [v._id, v.vehicleNumber ? `${v.name} ${v.vehicleNumber}` : v.name]),
+      vehicles.map((v) => [
+        v._id,
+        v.vehicleNumber ? `${v.type || v.name} ${v.vehicleNumber}` : v.type || v.name,
+      ]),
     );
 
     const rows: ReportRow[] = [...trips]
@@ -305,30 +469,47 @@ export const api = {
   },
 
   getSettings: async (): Promise<AppSettings> => {
-    const { data, error } = await supabase
+    const userId = await getCurrentUserId();
+    if (!userId) throw new ApiError("Authentication required");
+
+    const baseCols = "id, app_name, currency, default_vehicle_id, updated_at";
+    const profileCols =
+      "transportation_name, full_name, mobile_number, business_name, address, contact_number, business_email";
+
+    let { data, error } = await supabase
       .from("app_settings")
-      .select("id, app_name, currency, default_vehicle_id, updated_at")
+      .select(`${baseCols}, ${profileCols}`)
+      .eq("user_id", userId)
       .limit(1)
       .maybeSingle();
-    if (error) fail(error);
-    if (data) {
-      const optional = await supabase
+
+    let profileFromCache = false;
+    if (error && isMissingSettingsColumn(error)) {
+      profileFromCache = true;
+      ({ data, error } = await supabase
         .from("app_settings")
-        .select(
-          "transportation_name, full_name, mobile_number, business_name, address, contact_number, business_email",
-        )
-        .eq("id", data.id)
-        .maybeSingle();
-      if (optional.error && !isMissingSettingsColumn(optional.error)) fail(optional.error);
-      return toSettings({ ...(data as SettingsRow), ...(optional.data ?? {}) });
+        .select(baseCols)
+        .eq("user_id", userId)
+        .limit(1)
+        .maybeSingle());
     }
+    if (error) fail(error);
+
+    if (data) {
+      const base = data as SettingsRow;
+      return toSettings(profileFromCache ? { ...base, ...readProfileCache(userId) } : base);
+    }
+
     const created = await supabase
       .from("app_settings")
-      .insert({ app_name: "Vehicle Calculation System", currency: "INR" })
-      .select("id, app_name, currency, default_vehicle_id, updated_at")
+      .insert({ app_name: "Vehicle Calculation System", currency: "INR", user_id: userId })
+      .select(`${baseCols}, user_id`)
       .single();
     if (created.error) fail(created.error);
-    return toSettings(created.data as SettingsRow);
+    return toSettings({
+      ...(created.data as SettingsRow),
+      ...readProfileCache(userId),
+    });
   },
 
   updateSettings: async (payload: {
@@ -343,6 +524,8 @@ export const api = {
     contactNumber: string;
     businessEmail: string;
   }): Promise<AppSettings> => {
+    const userId = await getCurrentUserId();
+    if (!userId) throw new ApiError("Authentication required");
     const current = await api.getSettings();
     const { data, error } = await supabase
       .from("app_settings")
@@ -352,31 +535,54 @@ export const api = {
         default_vehicle_id: payload.defaultVehicleId,
       })
       .eq("id", current._id)
+      .eq("user_id", userId)
       .select("id, app_name, currency, default_vehicle_id, updated_at")
       .single();
     if (error) fail(error);
     const optional = await supabase
       .from("app_settings")
       .update({
-        transportation_name: payload.transportationName,
-        full_name: payload.fullName,
-        mobile_number: payload.mobileNumber,
-        business_name: payload.businessName,
-        address: payload.address,
-        contact_number: payload.contactNumber,
-        business_email: payload.businessEmail,
+        transportation_name: sanitizeString(payload.transportationName),
+        full_name: sanitizeString(payload.fullName),
+        mobile_number: sanitizeNumber(payload.mobileNumber),
+        business_name: sanitizeString(payload.businessName),
+        address: sanitizeString(payload.address),
+        contact_number: sanitizeNumber(payload.contactNumber),
+        business_email: sanitizeEmail(payload.businessEmail),
       })
-      .eq("id", current._id);
-    if (optional.error && !isMissingSettingsColumn(optional.error)) fail(optional.error);
-    return toSettings({
-      ...(data as SettingsRow),
-      transportation_name: payload.transportationName,
-      full_name: payload.fullName,
-      mobile_number: payload.mobileNumber,
-      business_name: payload.businessName,
+      .eq("id", current._id)
+      .eq("user_id", userId);
+
+    const profileFields: SettingsProfileCache = {
+      transportation_name: sanitizeString(payload.transportationName),
+      full_name: sanitizeString(payload.fullName),
+      mobile_number: sanitizeNumber(payload.mobileNumber),
+      business_name: sanitizeString(payload.businessName),
+      address: sanitizeString(payload.address),
+      contact_number: sanitizeNumber(payload.contactNumber),
+      business_email: sanitizeEmail(payload.businessEmail),
+    };
+
+    if (optional.error && isMissingSettingsColumn(optional.error)) {
+      writeProfileCache(userId, profileFields);
+    } else if (optional.error) {
+      fail(optional.error);
+    }
+
+    return {
+      ...current,
+      ...profileFields,
+      appName: payload.appName,
+      transportationName: payload.transportationName,
+      currency: payload.currency,
+      defaultVehicleId: payload.defaultVehicleId,
+      fullName: payload.fullName,
+      mobileNumber: payload.mobileNumber,
+      businessName: payload.businessName,
       address: payload.address,
-      contact_number: payload.contactNumber,
-      business_email: payload.businessEmail,
-    });
+      contactNumber: payload.contactNumber,
+      businessEmail: payload.businessEmail,
+      updatedAt: (data as SettingsRow | null)?.updated_at ?? current.updatedAt,
+    };
   },
 };

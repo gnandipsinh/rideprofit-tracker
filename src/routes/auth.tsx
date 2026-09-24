@@ -36,15 +36,15 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/auth")({
   head: () => ({
     meta: [
-      { title: "Secure Sign In — Vehicle Trip Profit Tracker" },
+      { title: "Jay Mataji Transport — Fleet Accounting" },
       {
         name: "description",
-        content: "Sign in or create an account to access your vehicle trip accounting dashboard.",
+        content: "Sign in to access your fleet accounting dashboard.",
       },
-      { property: "og:title", content: "Secure Sign In — Vehicle Trip Profit Tracker" },
+      { property: "og:title", content: "Jay Mataji Transport — Fleet Accounting" },
       {
         property: "og:description",
-        content: "Secure password authentication for your fleet trip and profit records.",
+        content: "Secure fleet accounting for Jay Mataji Transport.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -55,7 +55,7 @@ export const Route = createFileRoute("/auth")({
 
 type Step = "login" | "register" | "email-login" | "email-link" | "forgot" | "reset";
 type EmailLinkPurpose = "login" | "register" | "reset";
-
+type ForgotState = "form" | "confirmation";
 type Errors = Record<string, string>;
 
 function PasswordField({
@@ -77,8 +77,13 @@ function PasswordField({
 }) {
   const [show, setShow] = useState(false);
   return (
-    <div className="space-y-1.5">
-      <Label htmlFor={id}>{label}</Label>
+    <div className="space-y-2">
+      <Label
+        htmlFor={id}
+        className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+      >
+        {label}
+      </Label>
       <div className="relative">
         <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
@@ -88,18 +93,21 @@ function PasswordField({
           autoComplete={autoComplete}
           placeholder={placeholder}
           onChange={(e) => onChange(e.target.value)}
-          className={cn("pl-9 pr-11", error && "border-destructive")}
+          className={cn(
+            "h-12 pl-9 pr-11 rounded-xl bg-secondary/60 text-base",
+            error && "border-destructive focus-visible:ring-destructive",
+          )}
         />
         <button
           type="button"
           onClick={() => setShow((s) => !s)}
           aria-label={show ? "Hide password" : "Show password"}
-          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-2 text-muted-foreground hover:text-foreground"
+          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-2 text-muted-foreground hover:text-foreground transition-colors"
         >
           {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
         </button>
       </div>
-      {error ? <p className="text-xs font-medium text-destructive">{error}</p> : null}
+      {error ? <p className="mt-1 text-xs font-medium text-destructive">{error}</p> : null}
     </div>
   );
 }
@@ -117,18 +125,30 @@ function Field({
   error?: string | undefined;
 }) {
   return (
-    <div className="space-y-1.5">
-      <Label htmlFor={id}>{label}</Label>
+    <div className="space-y-2">
+      <Label
+        htmlFor={id}
+        className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+      >
+        {label}
+      </Label>
       <div className="relative">
         <Icon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input id={id} {...rest} className={cn("pl-9", error && "border-destructive")} />
+        <Input
+          id={id}
+          {...rest}
+          className={cn(
+            "h-12 pl-9 rounded-xl bg-secondary/60 text-base",
+            error && "border-destructive focus-visible:ring-destructive",
+          )}
+        />
       </div>
-      {error ? <p className="text-xs font-medium text-destructive">{error}</p> : null}
+      {error ? <p className="mt-1 text-xs font-medium text-destructive">{error}</p> : null}
     </div>
   );
 }
 
-function AuthPage() {
+export default function AuthPage() {
   const navigate = useNavigate();
 
   const [step, setStep] = useState<Step>("login");
@@ -145,6 +165,7 @@ function AuthPage() {
 
   const [emailLinkPurpose, setEmailLinkPurpose] = useState<EmailLinkPurpose>("login");
   const [cooldown, setCooldown] = useState(0);
+  const [forgotState, setForgotState] = useState<ForgotState>("form");
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -166,6 +187,7 @@ function AuthPage() {
   function reset(next: Step) {
     setErrors({});
     setFormError("");
+    setForgotState("form");
     setStep(next);
   }
 
@@ -287,19 +309,17 @@ function AuthPage() {
       setErrors({ email: parsed.error.issues[0]?.message ?? "Enter a valid email" });
       return;
     }
-    setBusy(true);
-    if (requestInFlight.current) {
-      setBusy(false);
-      return;
-    }
+    if (requestInFlight.current) return;
     requestInFlight.current = true;
+    setBusy(true);
     try {
       const { error } = await sendRecoveryEmail(parsed.data);
-      if (error) setFormError(safeAuthMessage(error.message));
-      else {
+      if (error) {
+        setFormError(safeAuthMessage(error.message));
+      } else {
         setEmailLinkPurpose("reset");
         setCooldown(RESEND_COOLDOWN_SECONDS);
-        reset("email-link");
+        setForgotState("confirmation");
         toast.success("Password reset link sent");
       }
     } finally {
@@ -340,6 +360,8 @@ function AuthPage() {
       setErrors(zodErrors(parsed.error.issues));
       return;
     }
+    if (requestInFlight.current) return;
+    requestInFlight.current = true;
     setBusy(true);
     try {
       const { error } = await supabase.auth.updateUser({ password: parsed.data.password });
@@ -354,6 +376,7 @@ function AuthPage() {
     } catch {
       setFormError(GENERIC_ERROR);
     } finally {
+      requestInFlight.current = false;
       setBusy(false);
     }
   }
@@ -383,21 +406,23 @@ function AuthPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4 py-10">
-      <div className="w-full max-w-md">
+    <div className="flex min-h-screen items-center justify-center bg-background px-4 py-8 pb-[env(safe-area-inset-bottom)] sm:px-6 lg:px-8">
+      <div className="w-full max-w-md lg:max-w-[30rem]">
         <div className="mb-6 flex flex-col items-center text-center">
-          <div className="grid h-14 w-14 place-items-center rounded-2xl bg-primary/15 text-primary ring-1 ring-primary/30">
+          <div className="grid h-16 w-16 place-items-center rounded-3xl bg-primary/15 text-primary shadow-[var(--shadow-gold)] ring-1 ring-primary/35">
             <Truck className="h-7 w-7" />
           </div>
-          <h1 className="mt-4 text-2xl font-bold tracking-tight">Vehicle Calculation System</h1>
-          <p className="mt-1 text-[0.65rem] font-semibold uppercase tracking-[0.25em] text-primary/80">
-            Secure Fleet Accounting
+          <h1 className="mt-4 text-2xl font-extrabold tracking-tight sm:text-3xl">
+            Jay Mataji Transport
+          </h1>
+          <p className="mt-1 text-[0.65rem] font-bold uppercase tracking-[0.3em] text-primary/85">
+            Fleet Accounting
           </p>
         </div>
 
-        <div className="rounded-3xl border border-border/70 bg-card/70 p-5 shadow-xl backdrop-blur-xl sm:p-7">
+        <div className="fleet-panel rounded-3xl p-5 backdrop-blur-xl sm:p-7">
           <div className="mb-5">
-            <h2 className="text-lg font-bold">{heading[step].title}</h2>
+            <h2 className="text-xl font-extrabold">{heading[step].title}</h2>
             <p className="mt-1 text-sm text-muted-foreground">{heading[step].sub}</p>
           </div>
 
@@ -436,7 +461,11 @@ function AuthPage() {
               >
                 Forgot password?
               </button>
-              <Button type="submit" disabled={busy} className="h-12 w-full text-sm font-bold">
+              <Button
+                type="submit"
+                disabled={busy}
+                className="h-12 w-full rounded-xl text-sm font-bold"
+              >
                 {busy ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
@@ -449,7 +478,7 @@ function AuthPage() {
                 variant="outline"
                 disabled={busy}
                 onClick={() => reset("email-login")}
-                className="h-12 w-full text-sm font-bold"
+                className="h-12 w-full rounded-xl text-sm font-bold"
               >
                 <Mail className="mr-2 h-4 w-4" /> Login with email link
               </Button>
@@ -480,7 +509,11 @@ function AuthPage() {
                 error={errors["email"]}
                 onChange={(e) => setEmail(e.target.value)}
               />
-              <Button type="submit" disabled={busy} className="h-12 w-full text-sm font-bold">
+              <Button
+                type="submit"
+                disabled={busy}
+                className="h-12 w-full rounded-xl text-sm font-bold"
+              >
                 {busy ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
@@ -493,7 +526,7 @@ function AuthPage() {
                 variant="outline"
                 disabled={busy}
                 onClick={() => reset("login")}
-                className="h-12 w-full text-sm font-bold"
+                className="h-12 w-full rounded-xl text-sm font-bold"
               >
                 Back to Login
               </Button>
@@ -554,7 +587,11 @@ function AuthPage() {
                 onChange={setConfirmPassword}
                 error={errors["confirmPassword"]}
               />
-              <Button type="submit" disabled={busy} className="h-12 w-full text-sm font-bold">
+              <Button
+                type="submit"
+                disabled={busy}
+                className="h-12 w-full rounded-xl text-sm font-bold"
+              >
                 {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                 Create account
               </Button>
@@ -572,33 +609,73 @@ function AuthPage() {
           ) : null}
 
           {step === "forgot" ? (
-            <form onSubmit={handleForgot} className="space-y-4">
-              <Field
-                id="forgot-email"
-                label="Registered email"
-                icon={Mail}
-                type="email"
-                inputMode="email"
-                autoComplete="email"
-                placeholder="Enter your email"
-                value={email}
-                error={errors["email"]}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-              <Button type="submit" disabled={busy} className="h-12 w-full text-sm font-bold">
-                {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                Send reset link
-              </Button>
-              <p className="text-center text-xs text-muted-foreground">
-                <button
-                  type="button"
-                  onClick={() => reset("login")}
-                  className="font-semibold text-primary hover:underline"
+            forgotState === "form" ? (
+              <form onSubmit={handleForgot} className="space-y-4">
+                <Field
+                  id="forgot-email"
+                  label="Registered email"
+                  icon={Mail}
+                  type="email"
+                  inputMode="email"
+                  autoComplete="email"
+                  placeholder="Enter your email"
+                  value={email}
+                  error={errors["email"]}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+                <Button
+                  type="submit"
+                  disabled={busy}
+                  className="h-12 w-full rounded-xl text-sm font-bold"
                 >
-                  Back to sign in
-                </button>
-              </p>
-            </form>
+                  {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                  Send reset link
+                </Button>
+                <p className="text-center text-xs text-muted-foreground">
+                  <button
+                    type="button"
+                    onClick={() => reset("login")}
+                    className="font-semibold text-primary hover:underline"
+                  >
+                    Back to sign in
+                  </button>
+                </p>
+              </form>
+            ) : (
+              <div className="space-y-4 text-center">
+                <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-primary/15 text-primary">
+                  <MailOpen className="h-8 w-8" />
+                </div>
+                <div className="space-y-1">
+                  <h2 className="text-lg font-semibold">Check your email</h2>
+                  <p className="text-sm text-muted-foreground">
+                    We've sent a password reset link to your registered email. Please check your
+                    inbox and click the link to continue.
+                  </p>
+                  {email && <p className="mt-1 text-xs text-muted-foreground/70">{email}</p>}
+                </div>
+                <Button
+                  type="button"
+                  disabled={cooldown > 0 || busy}
+                  onClick={handleResend}
+                  className="h-12 w-full rounded-xl text-sm font-bold"
+                >
+                  {cooldown > 0 ? `Resend reset link in ${cooldown}s` : "Resend Reset Email"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => {
+                    setForgotState("form");
+                    reset("login");
+                  }}
+                  className="h-12 w-full rounded-xl text-sm font-bold"
+                >
+                  Back to Login
+                </Button>
+              </div>
+            )
           ) : null}
 
           {step === "email-link" ? (
@@ -606,18 +683,42 @@ function AuthPage() {
               <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-primary/15 text-primary">
                 <MailOpen className="h-8 w-8" />
               </div>
-              <p className="text-sm text-muted-foreground">
-                {emailLinkPurpose === "reset"
-                  ? "We've sent a password reset link to your registered email. Please check your inbox and click the link to continue."
-                  : emailLinkPurpose === "register"
-                    ? "We've sent a confirmation link to your registered email. Please check your inbox and click the link to continue."
-                    : "We've sent a login link to your registered email. Please check your inbox and click the link to continue."}
-              </p>
+              <div className="space-y-1">
+                <h2 className="text-lg font-semibold">
+                  {emailLinkPurpose === "reset"
+                    ? "Check Your Email"
+                    : emailLinkPurpose === "register"
+                      ? "Check Your Email"
+                      : "Check Your Email"}
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  {emailLinkPurpose === "reset"
+                    ? "We've sent a password reset link to your registered email. Please check your inbox and click the link to continue."
+                    : emailLinkPurpose === "register"
+                      ? "We've sent a confirmation link to your registered email. Please check your inbox and click the link to continue."
+                      : "We've sent a login link to your registered email. Please check your inbox and click the link to continue."}
+                </p>
+                {email && <p className="mt-1 text-xs text-muted-foreground/70">{email}</p>}
+                <div className="mt-3 space-y-2 text-left text-xs text-muted-foreground">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4 text-primary" />
+                    <span>Click the link in your email</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4 text-primary" />
+                    <span>It will securely log you in</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="h-4 w-4 text-primary" />
+                    <span>The link will expire in 15 minutes</span>
+                  </div>
+                </div>
+              </div>
               <Button
                 type="button"
                 disabled={cooldown > 0 || busy}
                 onClick={handleResend}
-                className="h-12 w-full text-sm font-bold"
+                className="h-12 w-full rounded-xl whitespace-normal px-3 text-center text-sm font-bold leading-snug"
               >
                 {busy ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -625,7 +726,7 @@ function AuthPage() {
                   <CheckCircle2 className="mr-2 h-4 w-4" />
                 )}
                 {cooldown > 0
-                  ? `${emailLinkPurpose === "reset" ? "Resend Reset Email" : "Resend Login Email"} in ${cooldown}s`
+                  ? `${emailLinkPurpose === "reset" ? "Resend Reset Email" : emailLinkPurpose === "register" ? "Resend Confirmation Email" : "Resend Login Email"} in ${cooldown}s`
                   : emailLinkPurpose === "reset"
                     ? "Resend Reset Email"
                     : emailLinkPurpose === "register"
@@ -637,7 +738,7 @@ function AuthPage() {
                 variant="outline"
                 disabled={busy}
                 onClick={() => reset("login")}
-                className="h-12 w-full text-sm font-bold"
+                className="h-12 w-full rounded-xl text-sm font-bold"
               >
                 Back to Login
               </Button>
@@ -662,7 +763,11 @@ function AuthPage() {
                 onChange={setConfirmPassword}
                 error={errors["confirmPassword"]}
               />
-              <Button type="submit" disabled={busy} className="h-12 w-full text-sm font-bold">
+              <Button
+                type="submit"
+                disabled={busy}
+                className="h-12 w-full rounded-xl text-sm font-bold"
+              >
                 {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                 Update password
               </Button>

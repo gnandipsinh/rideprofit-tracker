@@ -11,7 +11,15 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { IndianRupee, TrendingDown, TrendingUp, Truck, Fuel, Route as RouteIcon } from "lucide-react";
+import {
+  IndianRupee,
+  TrendingDown,
+  TrendingUp,
+  Truck,
+  Fuel,
+  Route as RouteIcon,
+  Calendar,
+} from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { VehicleSelector } from "@/components/VehicleSelector";
 import { StatCard } from "@/components/StatCard";
@@ -21,7 +29,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useApp } from "@/lib/app-context";
 import { useTrips } from "@/lib/queries";
-import { aggregate } from "@/lib/calc";
+import { aggregate, profitOf } from "@/lib/calc";
 import { formatDateShort, formatIndianNumber, formatMoney, isoDayOnly } from "@/lib/format";
 import { DASHBOARD_PRESETS, dashboardRange, type DashboardPreset } from "@/lib/date-ranges";
 import { todayInput } from "@/lib/format";
@@ -30,13 +38,13 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/_authenticated/")({
   head: () => ({
     meta: [
-      { title: "Dashboard — Vehicle Trip Profit Tracker" },
+      { title: "Dashboard — Jay Mataji Transport" },
       {
         name: "description",
         content:
           "Vehicle-wise trip accounting dashboard: track daily income, diesel, driver payments, EMI share and net profit.",
       },
-      { property: "og:title", content: "Dashboard — Vehicle Trip Profit Tracker" },
+      { property: "og:title", content: "Dashboard — Jay Mataji Transport" },
       {
         property: "og:description",
         content: "Track daily trip income, expenses and profit for every vehicle in your fleet.",
@@ -46,8 +54,24 @@ export const Route = createFileRoute("/_authenticated/")({
   component: Dashboard,
 });
 
+function getGreeting(): string {
+  const h = new Date().getHours();
+  if (h < 12) return "Good Morning";
+  if (h < 17) return "Good Afternoon";
+  return "Good Evening";
+}
+
 function Dashboard() {
-  const { symbol, selectedVehicleId, isAllVehicles, vehicles, vehiclesLoading, vehiclesError } = useApp();
+  const {
+    symbol,
+    appName,
+    selectedVehicleId,
+    isAllVehicles,
+    vehicles,
+    activeVehicles,
+    vehiclesLoading,
+    vehiclesError,
+  } = useApp();
   const [preset, setPreset] = useState<DashboardPreset>("month");
   const [custom, setCustom] = useState({ fromDate: todayInput(), toDate: todayInput() });
 
@@ -57,11 +81,35 @@ function Dashboard() {
     Boolean(selectedVehicleId),
   );
 
-  const trips = tripsQuery.data ?? [];
+  const activeVehicleIds = useMemo(
+    () => new Set(activeVehicles.map((v) => v._id)),
+    [activeVehicles],
+  );
+  const trips = useMemo(() => {
+    const raw = tripsQuery.data ?? [];
+    return raw.filter((t) => activeVehicleIds.has(t.vehicleId));
+  }, [tripsQuery.data, activeVehicleIds]);
   const totals = useMemo(() => aggregate(trips), [trips]);
+  const recentTrips = useMemo(
+    () => [...trips].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5),
+    [trips],
+  );
+  const vehicleLabel = useMemo(
+    () =>
+      new Map(
+        activeVehicles.map((v) => [
+          v._id,
+          v.vehicleNumber ? `${v.type || v.name} · ${v.vehicleNumber}` : v.type || v.name,
+        ]),
+      ),
+    [activeVehicles],
+  );
 
   const chartData = useMemo(() => {
-    const byDay = new Map<string, { day: string; income: number; expense: number; profit: number }>();
+    const byDay = new Map<
+      string,
+      { day: string; income: number; expense: number; profit: number }
+    >();
     trips.forEach((t) => {
       const day = isoDayOnly(t.date);
       const expense = t.diesel + t.driverPayment + t.otherExpenses + t.emiShare;
@@ -77,9 +125,24 @@ function Dashboard() {
       .map((d) => ({ ...d, label: formatDateShort(d.day).slice(0, 5) }));
   }, [trips]);
 
+  const presetLabel = DASHBOARD_PRESETS.find((p) => p.value === preset)?.label ?? "This Month";
+
   return (
     <AppShell>
-      <div className="space-y-4">
+      <div className="page-stack">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-extrabold sm:text-2xl">{getGreeting()}</h2>
+            <p className="text-sm text-muted-foreground">{appName}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="glass-card rounded-xl px-3 py-2 text-xs font-semibold text-muted-foreground sm:px-4">
+              <Calendar className="mr-1.5 inline h-3.5 w-3.5 text-primary" />
+              {presetLabel}
+            </div>
+          </div>
+        </div>
+
         <VehicleSelector />
 
         <div className="glass-card rounded-2xl p-3">
@@ -89,7 +152,7 @@ function Dashboard() {
                 key={p.value}
                 onClick={() => setPreset(p.value)}
                 className={cn(
-                  "tap-scale rounded-full border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground",
+                  "tap-scale min-h-[44px] rounded-full border border-border px-4 py-2 text-xs font-semibold text-muted-foreground",
                   preset === p.value && "border-primary/50 bg-primary/15 text-primary",
                 )}
               >
@@ -119,9 +182,15 @@ function Dashboard() {
           <EmptyState
             icon={<Truck className="h-6 w-6" />}
             title="Could not load your vehicles"
-            description={vehiclesError.message || "The vehicle data service is unavailable. Try again shortly."}
+            description={
+              vehiclesError.message || "The vehicle data service is unavailable. Try again shortly."
+            }
             action={
-              <Button type="button" className="h-11 rounded-xl px-5 font-semibold" onClick={() => window.location.reload()}>
+              <Button
+                type="button"
+                className="h-11 rounded-xl px-5 font-semibold"
+                onClick={() => window.location.reload()}
+              >
                 Retry
               </Button>
             }
@@ -137,30 +206,61 @@ function Dashboard() {
               </Button>
             }
           />
+        ) : !vehiclesLoading && activeVehicles.length === 0 ? (
+          <EmptyState
+            icon={<Truck className="h-6 w-6" />}
+            title="No active vehicles"
+            description="Activate a vehicle on the Vehicles page to see dashboard stats."
+            action={
+              <Button asChild className="h-11 rounded-xl px-5 font-semibold">
+                <Link to="/vehicles">Go to Vehicles</Link>
+              </Button>
+            }
+          />
         ) : tripsQuery.isError ? (
           <EmptyState
             icon={<RouteIcon className="h-6 w-6" />}
             title="Could not load trips"
-            description={tripsQuery.error instanceof Error ? tripsQuery.error.message : "The trip data service is unavailable."}
+            description={
+              tripsQuery.error instanceof Error
+                ? tripsQuery.error.message
+                : "The trip data service is unavailable."
+            }
             action={
-              <Button type="button" className="h-11 rounded-xl px-5 font-semibold" onClick={() => void tripsQuery.refetch()}>
+              <Button
+                type="button"
+                className="h-11 rounded-xl px-5 font-semibold"
+                onClick={() => void tripsQuery.refetch()}
+              >
                 Retry
               </Button>
             }
           />
         ) : tripsQuery.isLoading ? (
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             {Array.from({ length: 4 }).map((_, i) => (
               <Skeleton key={i} className="h-24 rounded-2xl" />
             ))}
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
               <StatCard
-                label="Income"
+                label="Vehicles"
+                value={formatIndianNumber(activeVehicles.length)}
+                tone="default"
+                icon={<Truck className="h-4 w-4" />}
+              />
+              <StatCard
+                label="Total Trips"
+                value={formatIndianNumber(totals.trips)}
+                tone="default"
+                icon={<RouteIcon className="h-4 w-4" />}
+              />
+              <StatCard
+                label="Total Income"
                 value={formatMoney(totals.income, symbol)}
-                tone="gold"
+                tone="success"
                 icon={<IndianRupee className="h-4 w-4" />}
               />
               <StatCard
@@ -169,27 +269,62 @@ function Dashboard() {
                 tone="danger"
                 icon={<TrendingDown className="h-4 w-4" />}
               />
-              <StatCard
-                label="Net Profit"
-                value={formatMoney(totals.profit, symbol)}
-                tone={totals.profit >= 0 ? "success" : "danger"}
-                icon={<TrendingUp className="h-4 w-4" />}
-                sub={`${totals.trips} trip(s) · ${isAllVehicles ? "all vehicles" : "this vehicle"}`}
-              />
-              <StatCard
-                label="Trips"
-                value={formatIndianNumber(totals.trips)}
-                icon={<RouteIcon className="h-4 w-4" />}
-                sub={`Avg profit ${formatMoney(totals.trips ? totals.profit / totals.trips : 0, symbol)}`}
-              />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <StatCard label="Diesel" value={formatMoney(totals.diesel, symbol)} icon={<Fuel className="h-4 w-4" />} />
-              <StatCard label="Driver Payment" value={formatMoney(totals.driverPayment, symbol)} />
-              <StatCard label="Other Expenses" value={formatMoney(totals.otherExpenses, symbol)} />
-              <StatCard label="EMI Share" value={formatMoney(totals.emiShare, symbol)} />
+            <div className="glass-card rounded-2xl p-4 sm:p-5">
+              <div className="flex items-center justify-between">
+                <span className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                  Net Profit
+                </span>
+                <TrendingUp className="h-4 w-4 text-primary" />
+              </div>
+              <p
+                className={cn(
+                  "mt-2 text-2xl font-extrabold tabular-nums sm:text-3xl lg:text-4xl",
+                  totals.profit >= 0 ? "text-primary" : "text-destructive",
+                )}
+              >
+                {formatMoney(totals.profit, symbol)}
+              </p>
             </div>
+
+            {recentTrips.length > 0 ? (
+              <div>
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="text-sm font-bold">Recent Trips</h3>
+                  <Link to="/trips" className="text-xs font-semibold text-primary hover:underline">
+                    View All
+                  </Link>
+                </div>
+                <ul className="space-y-2">
+                  {recentTrips.map((t) => {
+                    const profit = profitOf(t);
+                    return (
+                      <li key={t._id} className="glass-card glass-card-hover rounded-2xl p-3">
+                        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-bold">
+                              {vehicleLabel.get(t.vehicleId) ?? "Vehicle"}
+                            </p>
+                            <p className="mt-0.5 text-xs text-muted-foreground">
+                              {formatDateShort(t.date)}
+                            </p>
+                          </div>
+                          <span
+                            className={cn(
+                              "text-sm font-bold tabular-nums",
+                              profit >= 0 ? "text-success" : "text-destructive",
+                            )}
+                          >
+                            {formatMoney(profit, symbol)}
+                          </span>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ) : null}
 
             {chartData.length === 0 ? (
               <EmptyState
@@ -199,53 +334,99 @@ function Dashboard() {
               />
             ) : (
               <>
-                <ChartCard title="Income vs Expense">
-                  <ResponsiveContainer width="100%" height={220}>
-                    <BarChart data={chartData} margin={{ top: 8, right: 4, left: -18, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(0 0% 100% / 0.08)" vertical={false} />
-                      <XAxis dataKey="label" tick={{ fontSize: 10 }} stroke="currentColor" opacity={0.5} />
-                      <YAxis tick={{ fontSize: 10 }} stroke="currentColor" opacity={0.5} width={44} />
-                      <Tooltip
-                        contentStyle={{
-                          background: "hsl(0 0% 8%)",
-                          border: "1px solid hsl(0 0% 100% / 0.1)",
-                          borderRadius: 12,
-                          fontSize: 12,
-                        }}
-                        formatter={(v: number) => formatMoney(v, symbol)}
-                      />
-                      <Bar dataKey="income" name="Income" fill="var(--color-primary)" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="expense" name="Expense" fill="var(--color-destructive)" radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </ChartCard>
+                <div className="grid gap-4 xl:grid-cols-2">
+                  <ChartCard title="Income vs Expense">
+                    <ResponsiveContainer width="100%" height={220}>
+                      <BarChart
+                        data={chartData}
+                        margin={{ top: 8, right: 4, left: -18, bottom: 0 }}
+                      >
+                        <CartesianGrid
+                          strokeDasharray="3 3"
+                          stroke="hsl(0 0% 100% / 0.08)"
+                          vertical={false}
+                        />
+                        <XAxis
+                          dataKey="label"
+                          tick={{ fontSize: 10 }}
+                          stroke="currentColor"
+                          opacity={0.5}
+                        />
+                        <YAxis
+                          tick={{ fontSize: 10 }}
+                          stroke="currentColor"
+                          opacity={0.5}
+                          width={44}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            background: "hsl(0 0% 8%)",
+                            border: "1px solid hsl(0 0% 100% / 0.1)",
+                            borderRadius: 12,
+                            fontSize: 12,
+                          }}
+                          formatter={(v: number) => formatMoney(v, symbol)}
+                        />
+                        <Bar
+                          dataKey="income"
+                          name="Income"
+                          fill="var(--color-primary)"
+                          radius={[4, 4, 0, 0]}
+                        />
+                        <Bar
+                          dataKey="expense"
+                          name="Expense"
+                          fill="var(--color-destructive)"
+                          radius={[4, 4, 0, 0]}
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </ChartCard>
 
-                <ChartCard title="Profit trend">
-                  <ResponsiveContainer width="100%" height={200}>
-                    <LineChart data={chartData} margin={{ top: 8, right: 4, left: -18, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(0 0% 100% / 0.08)" vertical={false} />
-                      <XAxis dataKey="label" tick={{ fontSize: 10 }} stroke="currentColor" opacity={0.5} />
-                      <YAxis tick={{ fontSize: 10 }} stroke="currentColor" opacity={0.5} width={44} />
-                      <Tooltip
-                        contentStyle={{
-                          background: "hsl(0 0% 8%)",
-                          border: "1px solid hsl(0 0% 100% / 0.1)",
-                          borderRadius: 12,
-                          fontSize: 12,
-                        }}
-                        formatter={(v: number) => formatMoney(v, symbol)}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="profit"
-                        name="Profit"
-                        stroke="var(--color-primary)"
-                        strokeWidth={2.5}
-                        dot={false}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </ChartCard>
+                  <ChartCard title="Profit trend">
+                    <ResponsiveContainer width="100%" height={200}>
+                      <LineChart
+                        data={chartData}
+                        margin={{ top: 8, right: 4, left: -18, bottom: 0 }}
+                      >
+                        <CartesianGrid
+                          strokeDasharray="3 3"
+                          stroke="hsl(0 0% 100% / 0.08)"
+                          vertical={false}
+                        />
+                        <XAxis
+                          dataKey="label"
+                          tick={{ fontSize: 10 }}
+                          stroke="currentColor"
+                          opacity={0.5}
+                        />
+                        <YAxis
+                          tick={{ fontSize: 10 }}
+                          stroke="currentColor"
+                          opacity={0.5}
+                          width={44}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            background: "hsl(0 0% 8%)",
+                            border: "1px solid hsl(0 0% 100% / 0.1)",
+                            borderRadius: 12,
+                            fontSize: 12,
+                          }}
+                          formatter={(v: number) => formatMoney(v, symbol)}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="profit"
+                          name="Profit"
+                          stroke="var(--color-primary)"
+                          strokeWidth={2.5}
+                          dot={false}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </ChartCard>
+                </div>
               </>
             )}
           </>
@@ -257,8 +438,10 @@ function Dashboard() {
 
 function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="glass-card rounded-2xl p-3">
-      <p className="mb-2 text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{title}</p>
+    <div className="glass-card rounded-2xl p-3 sm:p-4">
+      <p className="mb-2 text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground sm:text-xs">
+        {title}
+      </p>
       {children}
     </div>
   );

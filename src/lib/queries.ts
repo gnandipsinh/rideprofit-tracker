@@ -142,3 +142,16 @@ export function useSaveSettings() {
     onError: (e) => fail(e, "Could not save settings"),
   });
 }
+
+export function useToggleVehicleStatus() {
+  const invalidate = useInvalidateAll();
+  return useMutation({
+    mutationFn: ({ id, isActive }: { id: string; isActive: boolean }) =>
+      api.toggleVehicleStatus(id, isActive),
+    onSuccess: () => {
+      invalidate();
+      toast.success("Vehicle status updated");
+    },
+    onError: (e) => fail(e, "Could not update vehicle status"),
+  });
+}

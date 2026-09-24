@@ -12,18 +12,19 @@ import { useReport } from "@/lib/queries";
 import { downloadReportPdf } from "@/lib/pdf";
 import { formatDateShort, formatMoney, todayInput } from "@/lib/format";
 import { REPORT_PRESETS, reportRange, type ReportPreset } from "@/lib/date-ranges";
+import { ALL_VEHICLES } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/reports")({
   head: () => ({
     meta: [
-      { title: "Reports — Vehicle Profit & Expense Report" },
+      { title: "Reports — Jay Mataji Transport" },
       {
         name: "description",
         content:
           "Generate vehicle-wise profit and expense reports for any date range and download a professional PDF.",
       },
-      { property: "og:title", content: "Reports — Vehicle Profit & Expense Report" },
+      { property: "og:title", content: "Reports — Jay Mataji Transport" },
       {
         property: "og:description",
         content:
@@ -35,7 +36,8 @@ export const Route = createFileRoute("/_authenticated/reports")({
 });
 
 function ReportsPage() {
-  const { symbol, appName, settings, selectedVehicleId, vehicles, vehiclesLoading } = useApp();
+  const { symbol, appName, settings, selectedVehicleId, activeVehicles, vehiclesLoading } =
+    useApp();
   const [preset, setPreset] = useState<ReportPreset>("1m");
   const [custom, setCustom] = useState({ fromDate: todayInput(), toDate: todayInput() });
 
@@ -47,26 +49,59 @@ function ReportsPage() {
 
   const report = reportQuery.data;
   const money = (n: number) => formatMoney(n, symbol);
+  const activeVehicleIds = useMemo(
+    () => new Set(activeVehicles.map((v) => v._id)),
+    [activeVehicles],
+  );
+  const filteredReport = useMemo(() => {
+    if (!report) return report;
+    if (selectedVehicleId !== ALL_VEHICLES && selectedVehicleId !== "") {
+      return activeVehicleIds.has(selectedVehicleId) ? report : null;
+    }
+    const rows = report.rows.filter((r) => activeVehicleIds.has(r.vehicleId));
+    if (rows.length === report.rows.length) return report;
+    const summary = rows.reduce(
+      (acc, r) => ({
+        trips: acc.trips + 1,
+        income: acc.income + r.income,
+        diesel: acc.diesel + r.diesel,
+        driverPayment: acc.driverPayment + r.driverPayment,
+        otherExpenses: acc.otherExpenses + r.otherExpenses,
+        emiShare: acc.emiShare + r.emiShare,
+        totalExpense: acc.totalExpense + r.totalExpense,
+        profit: acc.profit + r.profit,
+      }),
+      {
+        trips: 0,
+        income: 0,
+        diesel: 0,
+        driverPayment: 0,
+        otherExpenses: 0,
+        emiShare: 0,
+        totalExpense: 0,
+        profit: 0,
+      },
+    );
+    return { ...report, rows, summary };
+  }, [report, selectedVehicleId, activeVehicleIds]);
 
   return (
     <AppShell showAddTrip={false}>
-      <div className="space-y-4">
+      <div className="page-stack">
         <div className="space-y-1">
-          <h2 className="text-lg font-bold">Reports</h2>
-          <p className="text-xs text-muted-foreground">
-            Vehicle-wise profit statement for any period
-          </p>
+          <h2 className="text-xl font-extrabold sm:text-2xl">Reports</h2>
+          <p className="text-xs text-muted-foreground">Vehicle-wise profit statement</p>
         </div>
 
         <VehicleSelector />
 
-        <div className="flex flex-wrap gap-2">
+        <div className="glass-card flex gap-2 overflow-x-auto rounded-2xl p-2 no-scrollbar sm:flex-wrap sm:overflow-visible">
           {REPORT_PRESETS.map((p) => (
             <button
               key={p.value}
               onClick={() => setPreset(p.value)}
               className={cn(
-                "tap-scale rounded-full border border-border/70 px-3.5 py-2 text-xs font-semibold",
+                "tap-scale min-h-[40px] shrink-0 rounded-xl border border-border/70 px-4 py-2 text-xs font-semibold",
                 preset === p.value
                   ? "border-primary/50 bg-primary/15 text-primary"
                   : "bg-secondary/50 text-muted-foreground",
@@ -78,31 +113,37 @@ function ReportsPage() {
         </div>
 
         {preset === "custom" ? (
-          <div className="grid grid-cols-2 gap-2">
-            <Input
-              type="date"
-              value={custom.fromDate}
-              onChange={(e) => setCustom((c) => ({ ...c, fromDate: e.target.value }))}
-              className="h-11 rounded-xl"
-            />
-            <Input
-              type="date"
-              value={custom.toDate}
-              onChange={(e) => setCustom((c) => ({ ...c, toDate: e.target.value }))}
-              className="h-11 rounded-xl"
-            />
+          <div className="fleet-panel grid grid-cols-2 gap-3 rounded-2xl p-3 sm:max-w-xl">
+            <label className="min-w-0 text-xs font-semibold text-muted-foreground">
+              Start date
+              <Input
+                type="date"
+                value={custom.fromDate}
+                onChange={(e) => setCustom((c) => ({ ...c, fromDate: e.target.value }))}
+                className="mt-1.5 h-11 min-w-0 rounded-xl bg-secondary/60"
+              />
+            </label>
+            <label className="min-w-0 text-xs font-semibold text-muted-foreground">
+              End date
+              <Input
+                type="date"
+                value={custom.toDate}
+                onChange={(e) => setCustom((c) => ({ ...c, toDate: e.target.value }))}
+                className="mt-1.5 h-11 min-w-0 rounded-xl bg-secondary/60"
+              />
+            </label>
           </div>
         ) : null}
 
         {vehiclesLoading || reportQuery.isLoading ? (
           <Skeleton className="h-64 w-full rounded-2xl" />
-        ) : vehicles.length === 0 ? (
+        ) : activeVehicles.length === 0 ? (
           <EmptyState
             icon={<FileText className="h-6 w-6" />}
-            title="No vehicles yet"
-            description="Add a vehicle and record trips to generate reports."
+            title="No active vehicles"
+            description="Activate a vehicle or add a new one to generate reports."
           />
-        ) : !report || report.rows.length === 0 ? (
+        ) : !filteredReport || filteredReport.rows.length === 0 ? (
           <EmptyState
             icon={<FileText className="h-6 w-6" />}
             title="No trips in this period"
@@ -110,19 +151,20 @@ function ReportsPage() {
           />
         ) : (
           <>
-            <div className="rounded-2xl border border-border/70 bg-card/70 p-4">
+            <div className="fleet-panel rounded-2xl p-4 sm:p-5">
               <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-bold">{report.vehicleLabel}</p>
+                  <p className="truncate text-sm font-bold">{filteredReport.vehicleLabel}</p>
                   <p className="text-xs text-muted-foreground">
-                    {formatDateShort(report.fromDate)} – {formatDateShort(report.toDate)} ·{" "}
-                    {report.summary.trips} trip(s)
+                    {formatDateShort(filteredReport.fromDate)} –{" "}
+                    {formatDateShort(filteredReport.toDate)} · {filteredReport.summary.trips}{" "}
+                    trip(s)
                   </p>
                 </div>
                 <Button
                   onClick={() =>
                     downloadReportPdf(
-                      report,
+                      filteredReport,
                       settings?.transportationName || settings?.businessName || appName,
                       symbol,
                     )
@@ -135,35 +177,76 @@ function ReportsPage() {
                 </Button>
               </div>
 
-              <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                {[
-                  { label: "Income", value: report.summary.income },
-                  { label: "Total Expense", value: report.summary.totalExpense },
-                  { label: "EMI Share", value: report.summary.emiShare },
-                  { label: "Net Profit", value: report.summary.profit },
-                ].map((item) => (
-                  <div key={item.label} className="rounded-xl bg-secondary/50 p-3">
-                    <dt className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                      {item.label}
-                    </dt>
-                    <dd
-                      className={cn(
-                        "mt-1 text-sm font-bold",
-                        item.label === "Net Profit" &&
-                          (item.value >= 0 ? "text-primary" : "text-destructive"),
-                      )}
-                    >
-                      {money(item.value)}
-                    </dd>
-                  </div>
-                ))}
+              <dl className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+                <div className="rounded-2xl border border-border/55 bg-background/30 p-3">
+                  <dt className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Income
+                  </dt>
+                  <dd className="mt-1 text-sm font-bold text-primary">
+                    {money(filteredReport.summary.income)}
+                  </dd>
+                </div>
+                <div className="rounded-2xl border border-border/55 bg-background/30 p-3">
+                  <dt className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Total Expense
+                  </dt>
+                  <dd className="mt-1 text-sm font-bold text-destructive">
+                    {money(filteredReport.summary.totalExpense)}
+                  </dd>
+                </div>
+                <div className="rounded-2xl border border-border/55 bg-background/30 p-3">
+                  <dt className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                    EMI Share
+                  </dt>
+                  <dd className="mt-1 text-sm font-bold">
+                    {money(filteredReport.summary.emiShare)}
+                  </dd>
+                </div>
+                <div className="rounded-2xl border border-border/55 bg-background/30 p-3">
+                  <dt className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Net Profit
+                  </dt>
+                  <dd
+                    className={cn(
+                      "mt-1 text-sm font-bold",
+                      filteredReport.summary.profit >= 0 ? "text-primary" : "text-destructive",
+                    )}
+                  >
+                    {money(filteredReport.summary.profit)}
+                  </dd>
+                </div>
+              </dl>
+
+              <dl className="mt-3 grid grid-cols-2 gap-3 border-t border-border/55 pt-3 sm:grid-cols-3 lg:hidden">
+                <div className="rounded-2xl border border-border/55 bg-background/30 p-3">
+                  <dt className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Diesel
+                  </dt>
+                  <dd className="mt-1 text-sm font-bold">{money(filteredReport.summary.diesel)}</dd>
+                </div>
+                <div className="rounded-2xl border border-border/55 bg-background/30 p-3">
+                  <dt className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Driver
+                  </dt>
+                  <dd className="mt-1 text-sm font-bold">
+                    {money(filteredReport.summary.driverPayment)}
+                  </dd>
+                </div>
+                <div className="rounded-2xl border border-border/55 bg-background/30 p-3 sm:col-span-3 lg:col-span-1">
+                  <dt className="text-[0.65rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Other
+                  </dt>
+                  <dd className="mt-1 text-sm font-bold">
+                    {money(filteredReport.summary.otherExpenses)}
+                  </dd>
+                </div>
               </dl>
             </div>
 
-            <div className="overflow-hidden rounded-2xl border border-border/70 bg-card/70">
+            <div className="overflow-hidden rounded-2xl border border-border/70 bg-card/70 shadow-[var(--shadow-card)]">
               <div className="max-h-[70vh] overflow-auto">
-                <table className="w-full min-w-[820px] border-collapse text-sm">
-                  <thead className="sticky top-0 z-10 bg-secondary/90 backdrop-blur">
+                <table className="report-table w-full border-collapse text-sm">
+                  <thead className="sticky top-0 z-10 bg-secondary/95 backdrop-blur">
                     <tr className="text-[0.7rem] uppercase tracking-wider text-muted-foreground">
                       <th className="px-3 py-3 text-left font-semibold">Date</th>
                       <th className="px-3 py-3 text-left font-semibold">Vehicle</th>
@@ -177,28 +260,33 @@ function ReportsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {report.rows.map((row) => (
+                    {filteredReport.rows.map((row) => (
                       <tr key={row._id} className="border-t border-border/60">
-                        <td className="whitespace-nowrap px-3 py-3">{formatDateShort(row.date)}</td>
-                        <td className="max-w-[10rem] truncate px-3 py-3 text-muted-foreground">
+                        <td className="whitespace-nowrap px-3 py-3" data-label="Date">
+                          {formatDateShort(row.date)}
+                        </td>
+                        <td
+                          className="max-w-[10rem] truncate px-3 py-3 text-muted-foreground"
+                          data-label="Vehicle"
+                        >
                           {row.vehicleName}
                         </td>
-                        <td className="whitespace-nowrap px-3 py-3 text-right">
+                        <td className="whitespace-nowrap px-3 py-3 text-right" data-label="Income">
                           {money(row.income)}
                         </td>
-                        <td className="whitespace-nowrap px-3 py-3 text-right">
+                        <td className="whitespace-nowrap px-3 py-3 text-right" data-label="Diesel">
                           {money(row.diesel)}
                         </td>
-                        <td className="whitespace-nowrap px-3 py-3 text-right">
+                        <td className="whitespace-nowrap px-3 py-3 text-right" data-label="Driver">
                           {money(row.driverPayment)}
                         </td>
-                        <td className="whitespace-nowrap px-3 py-3 text-right">
+                        <td className="whitespace-nowrap px-3 py-3 text-right" data-label="Other">
                           {money(row.otherExpenses)}
                         </td>
-                        <td className="whitespace-nowrap px-3 py-3 text-right">
+                        <td className="whitespace-nowrap px-3 py-3 text-right" data-label="EMI">
                           {money(row.emiShare)}
                         </td>
-                        <td className="whitespace-nowrap px-3 py-3 text-right">
+                        <td className="whitespace-nowrap px-3 py-3 text-right" data-label="Expense">
                           {money(row.totalExpense)}
                         </td>
                         <td
@@ -206,42 +294,44 @@ function ReportsPage() {
                             "whitespace-nowrap px-3 py-3 text-right font-semibold",
                             row.profit >= 0 ? "text-primary" : "text-destructive",
                           )}
+                          data-label="Profit"
                         >
                           {money(row.profit)}
                         </td>
                       </tr>
                     ))}
                   </tbody>
-                  <tfoot className="sticky bottom-0 bg-secondary/90 backdrop-blur">
+                  <tfoot className="sticky bottom-0 bg-secondary/95 backdrop-blur">
                     <tr className="border-t border-primary/30 font-bold">
-                      <td className="px-3 py-3" colSpan={2}>
+                      <td className="px-3 py-3" colSpan={2} data-label="Total">
                         Total
                       </td>
-                      <td className="whitespace-nowrap px-3 py-3 text-right">
-                        {money(report.summary.income)}
+                      <td className="whitespace-nowrap px-3 py-3 text-right" data-label="Income">
+                        {money(filteredReport.summary.income)}
                       </td>
-                      <td className="whitespace-nowrap px-3 py-3 text-right">
-                        {money(report.summary.diesel)}
+                      <td className="whitespace-nowrap px-3 py-3 text-right" data-label="Diesel">
+                        {money(filteredReport.summary.diesel)}
                       </td>
-                      <td className="whitespace-nowrap px-3 py-3 text-right">
-                        {money(report.summary.driverPayment)}
+                      <td className="whitespace-nowrap px-3 py-3 text-right" data-label="Driver">
+                        {money(filteredReport.summary.driverPayment)}
                       </td>
-                      <td className="whitespace-nowrap px-3 py-3 text-right">
-                        {money(report.summary.otherExpenses)}
+                      <td className="whitespace-nowrap px-3 py-3 text-right" data-label="Other">
+                        {money(filteredReport.summary.otherExpenses)}
                       </td>
-                      <td className="whitespace-nowrap px-3 py-3 text-right">
-                        {money(report.summary.emiShare)}
+                      <td className="whitespace-nowrap px-3 py-3 text-right" data-label="EMI">
+                        {money(filteredReport.summary.emiShare)}
                       </td>
-                      <td className="whitespace-nowrap px-3 py-3 text-right">
-                        {money(report.summary.totalExpense)}
+                      <td className="whitespace-nowrap px-3 py-3 text-right" data-label="Expense">
+                        {money(filteredReport.summary.totalExpense)}
                       </td>
                       <td
                         className={cn(
                           "whitespace-nowrap px-3 py-3 text-right",
-                          report.summary.profit >= 0 ? "text-primary" : "text-destructive",
+                          filteredReport.summary.profit >= 0 ? "text-primary" : "text-destructive",
                         )}
+                        data-label="Profit"
                       >
-                        {money(report.summary.profit)}
+                        {money(filteredReport.summary.profit)}
                       </td>
                     </tr>
                   </tfoot>

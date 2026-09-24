@@ -7,6 +7,7 @@ const SELECTED_KEY = "vcs.selectedVehicleId";
 
 interface AppContextValue {
   vehicles: Vehicle[];
+  activeVehicles: Vehicle[];
   vehiclesLoading: boolean;
   vehiclesError: Error | null;
   settings: AppSettings | undefined;
@@ -26,14 +27,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const settingsQuery = useSettings();
   const [selectedVehicleId, setSelected] = useState<string>("");
 
-  const vehicles = vehiclesQuery.data ?? [];
+  const vehicles = useMemo(() => vehiclesQuery.data ?? [], [vehiclesQuery.data]);
+  const activeVehicles = useMemo(() => vehicles.filter((v) => v.isActive), [vehicles]);
   const settings = settingsQuery.data;
 
-  // Restore last selection, else the configured default vehicle, else first vehicle.
+  // Restore last selection among active vehicles only; inactive vehicles are not selectable.
   useEffect(() => {
     if (vehicles.length === 0) return;
-    const ids = vehicles.map((v) => v._id);
-    if (selectedVehicleId && (selectedVehicleId === ALL_VEHICLES || ids.includes(selectedVehicleId))) return;
+    const ids = activeVehicles.map((v) => v._id);
+    if (
+      selectedVehicleId &&
+      (selectedVehicleId === ALL_VEHICLES || ids.includes(selectedVehicleId))
+    )
+      return;
 
     const stored = typeof window !== "undefined" ? window.localStorage.getItem(SELECTED_KEY) : null;
     const next =
@@ -43,7 +49,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           ? settings.defaultVehicleId
           : ids[0];
     setSelected(next ?? "");
-  }, [vehicles, settings?.defaultVehicleId, selectedVehicleId]);
+  }, [vehicles, activeVehicles, settings?.defaultVehicleId, selectedVehicleId]);
 
   const setSelectedVehicleId = (id: string) => {
     setSelected(id);
@@ -51,25 +57,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const value = useMemo<AppContextValue>(() => {
-    const selectedVehicle = vehicles.find((v) => v._id === selectedVehicleId) ?? null;
+    const selectedVehicle = activeVehicles.find((v) => v._id === selectedVehicleId) ?? null;
     const isAllVehicles = selectedVehicleId === ALL_VEHICLES;
     return {
       vehicles,
+      activeVehicles,
       vehiclesLoading: vehiclesQuery.isLoading,
       vehiclesError: (vehiclesQuery.error as Error | null) ?? null,
       settings,
-      appName: settings?.appName ?? "Vehicle Calculation System",
+      appName: settings?.transportationName || settings?.appName || "Vehicle Calculation System",
       symbol: currencySymbol(settings?.currency ?? "INR"),
       selectedVehicleId,
       setSelectedVehicleId,
       selectedVehicle,
       selectedLabel: isAllVehicles
         ? "All Vehicles"
-        : (selectedVehicle?.model || selectedVehicle?.name || "No vehicle selected"),
+        : selectedVehicle
+          ? [selectedVehicle.type || selectedVehicle.name, selectedVehicle.vehicleNumber]
+              .filter(Boolean)
+              .join(" · ") || "No vehicle selected"
+          : "No vehicle selected",
       isAllVehicles,
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vehicles, settings, selectedVehicleId, vehiclesQuery.isLoading, vehiclesQuery.error]);
+  }, [
+    vehicles,
+    activeVehicles,
+    settings,
+    selectedVehicleId,
+    vehiclesQuery.isLoading,
+    vehiclesQuery.error,
+  ]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

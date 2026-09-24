@@ -42,7 +42,7 @@ export function MoneyInput({
           {label}
         </label>
       ) : null}
-      <div className="flex h-12 w-full min-w-0 items-stretch overflow-hidden rounded-xl border border-input bg-secondary/60 transition-colors focus-within:border-primary/70 focus-within:ring-2 focus-within:ring-ring/25">
+      <div className="flex h-12 w-full min-w-0 items-stretch overflow-hidden rounded-xl border border-border/85 bg-background/45 shadow-inner shadow-black/20 transition-all duration-200 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/35">
         <span className="grid w-10 shrink-0 place-items-center border-r border-border/70 bg-muted/50 text-sm font-semibold text-primary">
           {symbol}
         </span>
