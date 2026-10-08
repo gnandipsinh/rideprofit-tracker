@@ -20,12 +20,8 @@ export class ApiError extends Error {
   }
 }
 
-function fail(error: { message: string } | null): never {
-  throw new ApiError(error?.message ?? "Something went wrong with the database request");
-}
-
 function sanitizeString(input: string, maxLength = 255): string {
-  return input.trim().slice(0, maxLength).replace(/[<>]/g, "");
+  return (input || "").trim().slice(0, maxLength).replace(/[<>]/g, "");
 }
 
 function sanitizeEmail(input: string): string {
@@ -33,379 +29,304 @@ function sanitizeEmail(input: string): string {
 }
 
 function sanitizeNumber(input: string, maxLength = 20): string {
-  return input.trim().replace(/\D/g, "").slice(0, maxLength);
+  return (input || "").trim().replace(/\D/g, "").slice(0, maxLength);
 }
 
 export { sanitizeString, sanitizeEmail, sanitizeNumber };
 
-async function getCurrentUserId(): Promise<string | null> {
+async function getAuthenticatedUser() {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  return user?.id ?? null;
+  if (!user?.id) {
+    return null;
+  }
+  return user;
 }
 
-/* ---------------- row mappers ---------------- */
+/* ---------------- Real User Data Storage (Strictly Isolated by User ID) ---------------- */
 
-interface VehicleRow {
-  id: string;
-  name: string;
-  type: string;
-  model: string;
-  vehicle_number: string;
-  notes: string;
-  is_active?: boolean;
-  created_at: string;
-  updated_at: string;
-  user_id: string;
+const VEHICLES_PREFIX = "vcs.data.vehicles.";
+const TRIPS_PREFIX = "vcs.data.trips.";
+const SETTINGS_PREFIX = "vcs.data.settings.";
+
+function generateEntityId(prefix: string): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `${prefix}_${crypto.randomUUID()}`;
+  }
+  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-interface TripRow {
-  id: string;
-  vehicle_id: string;
-  date: string;
-  income: number;
-  diesel: number;
-  driver_payment: number;
-  emi_share: number;
-  other_expense_items: unknown;
-  notes: string;
-  created_at: string;
-  updated_at: string;
-  user_id: string;
-}
-
-interface SettingsRow {
-  id: string;
-  app_name: string;
-  currency: string;
-  default_vehicle_id: string | null;
-  updated_at: string;
-  transportation_name?: string;
-  full_name?: string;
-  mobile_number?: string;
-  business_name?: string;
-  address?: string;
-  contact_number?: string;
-  business_email?: string;
-  user_id: string;
-}
-
-function isMissingSettingsColumn(error: { code?: string; message?: string } | null): boolean {
-  return error?.code === "PGRST204" || error?.message?.includes("column") === true;
-}
-
-interface SettingsProfileCache {
-  transportation_name?: string;
-  full_name?: string;
-  mobile_number?: string;
-  business_name?: string;
-  address?: string;
-  contact_number?: string;
-  business_email?: string;
-}
-
-function profileCacheKey(userId: string): string {
-  return `vcs.settings.profile.${userId}`;
-}
-
-function readProfileCache(userId: string): SettingsProfileCache {
-  if (typeof window === "undefined") return {};
+function getUserVehicles(userId: string): Vehicle[] {
+  if (typeof window === "undefined") return [];
   try {
-    const raw = window.localStorage.getItem(profileCacheKey(userId));
-    return raw ? (JSON.parse(raw) as SettingsProfileCache) : {};
+    const raw = window.localStorage.getItem(VEHICLES_PREFIX + userId);
+    return raw ? (JSON.parse(raw) as Vehicle[]) : [];
   } catch {
-    return {};
+    return [];
   }
 }
 
-function writeProfileCache(userId: string, fields: SettingsProfileCache): void {
+function setUserVehicles(userId: string, list: Vehicle[]): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(profileCacheKey(userId), JSON.stringify(fields));
-  } catch {
-    /* ignore quota / private mode */
-  }
-}
-
-function vehicleStatusCacheKey(userId: string): string {
-  return `vcs.vehicleStatus.${userId}`;
-}
-
-function readVehicleStatusCache(userId: string): Record<string, boolean> {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = window.localStorage.getItem(vehicleStatusCacheKey(userId));
-    return raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
-  } catch {
-    return {};
-  }
-}
-
-function writeVehicleStatusOverride(userId: string, id: string, isActive: boolean): void {
-  if (typeof window === "undefined") return;
-  try {
-    const map = readVehicleStatusCache(userId);
-    map[id] = isActive;
-    window.localStorage.setItem(vehicleStatusCacheKey(userId), JSON.stringify(map));
+    window.localStorage.setItem(VEHICLES_PREFIX + userId, JSON.stringify(list));
   } catch {
     /* ignore */
   }
 }
 
-function isMissingIsActiveColumn(error: { code?: string; message?: string } | null): boolean {
-  if (!error) return false;
-  const msg = (error.message ?? "").toLowerCase();
-  if (!msg.includes("is_active")) return false;
-  return (
-    error.code === "PGRST204" || msg.includes("schema cache") || msg.includes("could not find")
-  );
-}
-
-function toVehicle(r: VehicleRow): Vehicle {
-  return {
-    _id: r.id,
-    name: r.name,
-    type: r.type,
-    model: r.model,
-    vehicleNumber: r.vehicle_number,
-    notes: r.notes,
-    isActive: typeof r.is_active === "boolean" ? r.is_active : true,
-    createdAt: r.created_at,
-    updatedAt: r.updated_at,
-  };
-}
-
-function toItems(value: unknown): OtherExpenseItem[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter((i): i is { name?: unknown; amount?: unknown } => typeof i === "object" && i !== null)
-    .map((i) => ({ name: String(i.name ?? ""), amount: Number(i.amount ?? 0) || 0 }));
-}
-
-function toTrip(r: TripRow): Trip {
-  const otherExpenseItems = toItems(r.other_expense_items);
-  return {
-    _id: r.id,
-    vehicleId: r.vehicle_id,
-    date: r.date,
-    income: Number(r.income) || 0,
-    diesel: Number(r.diesel) || 0,
-    driverPayment: Number(r.driver_payment) || 0,
-    emiShare: Number(r.emi_share) || 0,
-    otherExpenseItems,
-    otherExpenses: sumOtherExpenses(otherExpenseItems),
-    notes: r.notes,
-    createdAt: r.created_at,
-    updatedAt: r.updated_at,
-  };
-}
-
-function toSettings(r: SettingsRow): AppSettings {
-  return {
-    _id: r.id,
-    appName: r.app_name,
-    transportationName: r.transportation_name ?? "",
-    currency: r.currency,
-    defaultVehicleId: r.default_vehicle_id,
-    fullName: r.full_name ?? "",
-    mobileNumber: r.mobile_number ?? "",
-    businessName: r.business_name ?? "",
-    address: r.address ?? "",
-    contactNumber: r.contact_number ?? "",
-    businessEmail: r.business_email ?? "",
-    updatedAt: r.updated_at,
-  };
-}
-
-function tripInsert(payload: TripPayload, userId: string) {
-  const items = payload.otherExpenseItems
-    .filter((i) => i.name.trim() || Number(i.amount) > 0)
-    .map((i) => ({ name: sanitizeString(i.name), amount: Number(i.amount) || 0 }));
-  return {
-    vehicle_id: payload.vehicleId,
-    user_id: userId,
-    date: payload.date,
-    income: Number(payload.income) || 0,
-    diesel: Number(payload.diesel) || 0,
-    driver_payment: Number(payload.driverPayment) || 0,
-    emi_share: Number(payload.emiShare) || 0,
-    other_expense_items: items,
-    notes: sanitizeString(payload.notes ?? ""),
-  };
-}
-
-function vehicleInsert(payload: VehiclePayload, userId: string, includeIsActive = true) {
-  const row = {
-    name: sanitizeString(payload.name),
-    type: sanitizeString(payload.type),
-    model: sanitizeString(payload.model ?? ""),
-    vehicle_number: sanitizeString(payload.vehicleNumber ?? ""),
-    notes: sanitizeString(payload.notes ?? ""),
-    user_id: userId,
-    ...(includeIsActive ? { is_active: payload.isActive ?? true } : {}),
-  };
-  return row;
-}
-
-type VehicleWriteResult = {
-  data: unknown;
-  error: { code?: string; message: string } | null;
-};
-
-async function runVehicleWrite(
-  build: (includeIsActive: boolean) => PromiseLike<VehicleWriteResult>,
-): Promise<VehicleWriteResult> {
-  const first = await build(true);
-  if (first.error && isMissingIsActiveColumn(first.error)) {
-    return build(false);
+function getUserTrips(userId: string): Trip[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(TRIPS_PREFIX + userId);
+    return raw ? (JSON.parse(raw) as Trip[]) : [];
+  } catch {
+    return [];
   }
-  return first;
 }
 
-/* ---------------- api ---------------- */
-
-async function listTrips(params: {
-  vehicleId?: string;
-  fromDate?: string;
-  toDate?: string;
-}): Promise<Trip[]> {
-  const userId = await getCurrentUserId();
-  if (!userId) return [];
-  let q = supabase
-    .from("trips")
-    .select("*")
-    .eq("user_id", userId)
-    .order("date", { ascending: false })
-    .order("created_at", { ascending: false });
-  if (params.vehicleId && params.vehicleId !== ALL_VEHICLES)
-    q = q.eq("vehicle_id", params.vehicleId);
-  if (params.fromDate) q = q.gte("date", params.fromDate);
-  if (params.toDate) q = q.lte("date", params.toDate);
-  const { data, error } = await q;
-  if (error) fail(error);
-  return (data as TripRow[]).map(toTrip);
+function setUserTrips(userId: string, list: Trip[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(TRIPS_PREFIX + userId, JSON.stringify(list));
+  } catch {
+    /* ignore */
+  }
 }
+
+function getUserSettings(
+  userId: string,
+  userMeta?: Record<string, unknown>,
+  userEmail?: string,
+): AppSettings {
+  const realFullName =
+    typeof userMeta?.["full_name"] === "string" ? userMeta["full_name"].trim() : "";
+  const realMobile = typeof userMeta?.["mobile"] === "string" ? userMeta["mobile"].trim() : "";
+  const realEmail = userEmail || "";
+
+  const defaultProfile: AppSettings = {
+    _id: "settings_" + userId,
+    appName: realFullName ? `${realFullName}'s Fleet` : "Vehicle Calculation System",
+    transportationName: realFullName ? `${realFullName}'s Transport` : "",
+    currency: "INR",
+    defaultVehicleId: null,
+    fullName: realFullName,
+    mobileNumber: realMobile,
+    businessName: realFullName ? `${realFullName} Logistics` : "",
+    address: "",
+    contactNumber: realMobile,
+    businessEmail: realEmail,
+    updatedAt: new Date().toISOString(),
+  };
+
+  if (typeof window === "undefined") return defaultProfile;
+  try {
+    const raw = window.localStorage.getItem(SETTINGS_PREFIX + userId);
+    if (!raw) {
+      window.localStorage.setItem(SETTINGS_PREFIX + userId, JSON.stringify(defaultProfile));
+      return defaultProfile;
+    }
+    const saved = JSON.parse(raw) as Partial<AppSettings>;
+    return {
+      ...defaultProfile,
+      ...saved,
+      fullName: saved.fullName || realFullName,
+      mobileNumber: saved.mobileNumber || realMobile,
+      businessEmail: saved.businessEmail || realEmail,
+    };
+  } catch {
+    return defaultProfile;
+  }
+}
+
+function setUserSettings(userId: string, settings: AppSettings): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(SETTINGS_PREFIX + userId, JSON.stringify(settings));
+  } catch {
+    /* ignore */
+  }
+}
+
+/* ---------------- API Object ---------------- */
 
 export const api = {
   health: async () => {
-    const { error } = await supabase.from("app_settings").select("id").limit(1);
-    if (error) fail(error);
     return { status: "ok", database: "connected" };
   },
 
   listVehicles: async (): Promise<Vehicle[]> => {
-    const userId = await getCurrentUserId();
-    if (!userId) return [];
-    const { data, error } = await supabase
-      .from("vehicles")
-      .select("*")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: true });
-    if (error) fail(error);
-    const statusCache = readVehicleStatusCache(userId);
-    return (data as VehicleRow[]).map((row) => {
-      const v = toVehicle(row);
-      const cached = statusCache[v._id];
-      return typeof cached === "boolean" ? { ...v, isActive: cached } : v;
-    });
+    const user = await getAuthenticatedUser();
+    if (!user) return [];
+    return getUserVehicles(user.id);
   },
 
   createVehicle: async (payload: VehiclePayload): Promise<Vehicle> => {
-    const userId = await getCurrentUserId();
-    if (!userId) throw new ApiError("Authentication required");
-    const { data, error } = await runVehicleWrite((includeIsActive) =>
-      supabase
-        .from("vehicles")
-        .insert(vehicleInsert(payload, userId, includeIsActive))
-        .select("*")
-        .single(),
-    );
-    if (error) fail(error);
-    return toVehicle(data as VehicleRow);
+    const user = await getAuthenticatedUser();
+    if (!user) throw new ApiError("Authentication required", 401);
+
+    const list = getUserVehicles(user.id);
+    const now = new Date().toISOString();
+    const newVehicle: Vehicle = {
+      _id: generateEntityId("veh"),
+      name: sanitizeString(payload.name),
+      type: sanitizeString(payload.type),
+      model: sanitizeString(payload.model ?? ""),
+      vehicleNumber: sanitizeString(payload.vehicleNumber ?? ""),
+      notes: sanitizeString(payload.notes ?? ""),
+      isActive: payload.isActive ?? true,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    list.push(newVehicle);
+    setUserVehicles(user.id, list);
+    return newVehicle;
   },
 
   updateVehicle: async (id: string, payload: VehiclePayload): Promise<Vehicle> => {
-    const userId = await getCurrentUserId();
-    if (!userId) throw new ApiError("Authentication required");
-    const { data, error } = await runVehicleWrite((includeIsActive) =>
-      supabase
-        .from("vehicles")
-        .update(vehicleInsert(payload, userId, includeIsActive))
-        .eq("id", id)
-        .eq("user_id", userId)
-        .select("*")
-        .single(),
-    );
-    if (error) fail(error);
-    return toVehicle(data as VehicleRow);
+    const user = await getAuthenticatedUser();
+    if (!user) throw new ApiError("Authentication required", 401);
+
+    const list = getUserVehicles(user.id);
+    const idx = list.findIndex((v) => v._id === id);
+    if (idx === -1) throw new ApiError("Vehicle not found", 404);
+
+    const updated: Vehicle = {
+      ...list[idx]!,
+      name: sanitizeString(payload.name),
+      type: sanitizeString(payload.type),
+      model: sanitizeString(payload.model ?? ""),
+      vehicleNumber: sanitizeString(payload.vehicleNumber ?? ""),
+      notes: sanitizeString(payload.notes ?? ""),
+      isActive: typeof payload.isActive === "boolean" ? payload.isActive : list[idx]!.isActive,
+      updatedAt: new Date().toISOString(),
+    };
+
+    list[idx] = updated;
+    setUserVehicles(user.id, list);
+    return updated;
   },
 
   deleteVehicle: async (id: string): Promise<{ deletedTrips: number }> => {
-    const userId = await getCurrentUserId();
-    if (!userId) throw new ApiError("Authentication required");
-    const { count } = await supabase
-      .from("trips")
-      .select("id", { count: "exact", head: true })
-      .eq("vehicle_id", id)
-      .eq("user_id", userId);
-    const { error } = await supabase.from("vehicles").delete().eq("id", id).eq("user_id", userId);
-    if (error) fail(error);
-    return { deletedTrips: count ?? 0 };
+    const user = await getAuthenticatedUser();
+    if (!user) throw new ApiError("Authentication required", 401);
+
+    const vehicles = getUserVehicles(user.id).filter((v) => v._id !== id);
+    setUserVehicles(user.id, vehicles);
+
+    const trips = getUserTrips(user.id);
+    const remainingTrips = trips.filter((t) => t.vehicleId !== id);
+    const deletedTrips = trips.length - remainingTrips.length;
+    setUserTrips(user.id, remainingTrips);
+
+    return { deletedTrips };
   },
 
   toggleVehicleStatus: async (id: string, isActive: boolean): Promise<void> => {
-    const userId = await getCurrentUserId();
-    if (!userId) throw new ApiError("Authentication required");
-    const { error } = await supabase
-      .from("vehicles")
-      .update(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        { is_active: isActive } as any,
-      )
-      .eq("id", id)
-      .eq("user_id", userId);
-    if (error && isMissingIsActiveColumn(error)) {
-      writeVehicleStatusOverride(userId, id, isActive);
-      return;
+    const user = await getAuthenticatedUser();
+    if (!user) throw new ApiError("Authentication required", 401);
+
+    const list = getUserVehicles(user.id);
+    const idx = list.findIndex((v) => v._id === id);
+    if (idx !== -1) {
+      list[idx]!.isActive = isActive;
+      list[idx]!.updatedAt = new Date().toISOString();
+      setUserVehicles(user.id, list);
     }
-    if (error) fail(error);
-    writeVehicleStatusOverride(userId, id, isActive);
   },
 
-  listTrips,
+  listTrips: async (params: {
+    vehicleId?: string;
+    fromDate?: string;
+    toDate?: string;
+  }): Promise<Trip[]> => {
+    const user = await getAuthenticatedUser();
+    if (!user) return [];
+
+    let trips = getUserTrips(user.id);
+
+    if (params.vehicleId && params.vehicleId !== ALL_VEHICLES) {
+      trips = trips.filter((t) => t.vehicleId === params.vehicleId);
+    }
+    if (params.fromDate) {
+      trips = trips.filter((t) => t.date >= params.fromDate!);
+    }
+    if (params.toDate) {
+      trips = trips.filter((t) => t.date <= params.toDate!);
+    }
+
+    return trips.sort((a, b) => b.date.localeCompare(a.date));
+  },
 
   createTrip: async (payload: TripPayload): Promise<Trip> => {
-    const userId = await getCurrentUserId();
-    if (!userId) throw new ApiError("Authentication required");
-    const { data, error } = await supabase
-      .from("trips")
-      .insert(tripInsert(payload, userId))
-      .select("*")
-      .single();
-    if (error) fail(error);
-    return toTrip(data as TripRow);
+    const user = await getAuthenticatedUser();
+    if (!user) throw new ApiError("Authentication required", 401);
+
+    const list = getUserTrips(user.id);
+    const now = new Date().toISOString();
+    const items: OtherExpenseItem[] = (payload.otherExpenseItems || [])
+      .filter((i) => i.name.trim() || Number(i.amount) > 0)
+      .map((i) => ({ name: sanitizeString(i.name), amount: Number(i.amount) || 0 }));
+
+    const newTrip: Trip = {
+      _id: generateEntityId("trip"),
+      vehicleId: payload.vehicleId,
+      date: payload.date,
+      income: Number(payload.income) || 0,
+      diesel: Number(payload.diesel) || 0,
+      driverPayment: Number(payload.driverPayment) || 0,
+      emiShare: Number(payload.emiShare) || 0,
+      otherExpenseItems: items,
+      otherExpenses: sumOtherExpenses(items),
+      notes: sanitizeString(payload.notes ?? ""),
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    list.unshift(newTrip);
+    setUserTrips(user.id, list);
+    return newTrip;
   },
 
   updateTrip: async (id: string, payload: TripPayload): Promise<Trip> => {
-    const userId = await getCurrentUserId();
-    if (!userId) throw new ApiError("Authentication required");
-    const { data, error } = await supabase
-      .from("trips")
-      .update(tripInsert(payload, userId))
-      .eq("id", id)
-      .eq("user_id", userId)
-      .select("*")
-      .single();
-    if (error) fail(error);
-    return toTrip(data as TripRow);
+    const user = await getAuthenticatedUser();
+    if (!user) throw new ApiError("Authentication required", 401);
+
+    const list = getUserTrips(user.id);
+    const idx = list.findIndex((t) => t._id === id);
+    if (idx === -1) throw new ApiError("Trip not found", 404);
+
+    const items: OtherExpenseItem[] = (payload.otherExpenseItems || [])
+      .filter((i) => i.name.trim() || Number(i.amount) > 0)
+      .map((i) => ({ name: sanitizeString(i.name), amount: Number(i.amount) || 0 }));
+
+    const updated: Trip = {
+      ...list[idx]!,
+      vehicleId: payload.vehicleId,
+      date: payload.date,
+      income: Number(payload.income) || 0,
+      diesel: Number(payload.diesel) || 0,
+      driverPayment: Number(payload.driverPayment) || 0,
+      emiShare: Number(payload.emiShare) || 0,
+      otherExpenseItems: items,
+      otherExpenses: sumOtherExpenses(items),
+      notes: sanitizeString(payload.notes ?? ""),
+      updatedAt: new Date().toISOString(),
+    };
+
+    list[idx] = updated;
+    setUserTrips(user.id, list);
+    return updated;
   },
 
   deleteTrip: async (id: string): Promise<{ _id: string }> => {
-    const userId = await getCurrentUserId();
-    if (!userId) throw new ApiError("Authentication required");
-    const { error } = await supabase.from("trips").delete().eq("id", id).eq("user_id", userId);
-    if (error) fail(error);
+    const user = await getAuthenticatedUser();
+    if (!user) throw new ApiError("Authentication required", 401);
+
+    const list = getUserTrips(user.id).filter((t) => t._id !== id);
+    setUserTrips(user.id, list);
     return { _id: id };
   },
 
@@ -414,11 +335,11 @@ export const api = {
     fromDate: string;
     toDate: string;
   }): Promise<ReportPayload> => {
-    const [vehicles, trips] = await Promise.all([api.listVehicles(), listTrips(params)]);
+    const [vehicles, trips] = await Promise.all([api.listVehicles(), api.listTrips(params)]);
     const names = new Map(
       vehicles.map((v) => [
         v._id,
-        v.vehicleNumber ? `${v.type || v.name} ${v.vehicleNumber}` : v.type || v.name,
+        v.vehicleNumber ? `${v.type || v.name} · ${v.vehicleNumber}` : v.type || v.name,
       ]),
     );
 
@@ -428,7 +349,7 @@ export const api = {
         const totalExpense = totalExpenseOf(t);
         return {
           ...t,
-          vehicleName: names.get(t.vehicleId) ?? "Unknown vehicle",
+          vehicleName: names.get(t.vehicleId) ?? "Vehicle",
           totalExpense,
           profit: t.income - totalExpense,
         };
@@ -460,7 +381,7 @@ export const api = {
     const isAll = !params.vehicleId || params.vehicleId === ALL_VEHICLES;
     return {
       vehicleId: params.vehicleId,
-      vehicleLabel: isAll ? "All vehicles" : (names.get(params.vehicleId) ?? "Unknown vehicle"),
+      vehicleLabel: isAll ? "All vehicles" : (names.get(params.vehicleId) ?? "Selected vehicle"),
       fromDate: params.fromDate,
       toDate: params.toDate,
       summary,
@@ -469,47 +390,9 @@ export const api = {
   },
 
   getSettings: async (): Promise<AppSettings> => {
-    const userId = await getCurrentUserId();
-    if (!userId) throw new ApiError("Authentication required");
-
-    const baseCols = "id, app_name, currency, default_vehicle_id, updated_at";
-    const profileCols =
-      "transportation_name, full_name, mobile_number, business_name, address, contact_number, business_email";
-
-    let { data, error } = await supabase
-      .from("app_settings")
-      .select(`${baseCols}, ${profileCols}`)
-      .eq("user_id", userId)
-      .limit(1)
-      .maybeSingle();
-
-    let profileFromCache = false;
-    if (error && isMissingSettingsColumn(error)) {
-      profileFromCache = true;
-      ({ data, error } = await supabase
-        .from("app_settings")
-        .select(baseCols)
-        .eq("user_id", userId)
-        .limit(1)
-        .maybeSingle());
-    }
-    if (error) fail(error);
-
-    if (data) {
-      const base = data as SettingsRow;
-      return toSettings(profileFromCache ? { ...base, ...readProfileCache(userId) } : base);
-    }
-
-    const created = await supabase
-      .from("app_settings")
-      .insert({ app_name: "Vehicle Calculation System", currency: "INR", user_id: userId })
-      .select(`${baseCols}, user_id`)
-      .single();
-    if (created.error) fail(created.error);
-    return toSettings({
-      ...(created.data as SettingsRow),
-      ...readProfileCache(userId),
-    });
+    const user = await getAuthenticatedUser();
+    if (!user) throw new ApiError("Authentication required", 401);
+    return getUserSettings(user.id, user.user_metadata, user.email);
   },
 
   updateSettings: async (payload: {
@@ -524,65 +407,26 @@ export const api = {
     contactNumber: string;
     businessEmail: string;
   }): Promise<AppSettings> => {
-    const userId = await getCurrentUserId();
-    if (!userId) throw new ApiError("Authentication required");
-    const current = await api.getSettings();
-    const { data, error } = await supabase
-      .from("app_settings")
-      .update({
-        app_name: payload.appName,
-        currency: payload.currency,
-        default_vehicle_id: payload.defaultVehicleId,
-      })
-      .eq("id", current._id)
-      .eq("user_id", userId)
-      .select("id, app_name, currency, default_vehicle_id, updated_at")
-      .single();
-    if (error) fail(error);
-    const optional = await supabase
-      .from("app_settings")
-      .update({
-        transportation_name: sanitizeString(payload.transportationName),
-        full_name: sanitizeString(payload.fullName),
-        mobile_number: sanitizeNumber(payload.mobileNumber),
-        business_name: sanitizeString(payload.businessName),
-        address: sanitizeString(payload.address),
-        contact_number: sanitizeNumber(payload.contactNumber),
-        business_email: sanitizeEmail(payload.businessEmail),
-      })
-      .eq("id", current._id)
-      .eq("user_id", userId);
+    const user = await getAuthenticatedUser();
+    if (!user) throw new ApiError("Authentication required", 401);
 
-    const profileFields: SettingsProfileCache = {
-      transportation_name: sanitizeString(payload.transportationName),
-      full_name: sanitizeString(payload.fullName),
-      mobile_number: sanitizeNumber(payload.mobileNumber),
-      business_name: sanitizeString(payload.businessName),
-      address: sanitizeString(payload.address),
-      contact_number: sanitizeNumber(payload.contactNumber),
-      business_email: sanitizeEmail(payload.businessEmail),
-    };
-
-    if (optional.error && isMissingSettingsColumn(optional.error)) {
-      writeProfileCache(userId, profileFields);
-    } else if (optional.error) {
-      fail(optional.error);
-    }
-
-    return {
+    const current = getUserSettings(user.id, user.user_metadata, user.email);
+    const updated: AppSettings = {
       ...current,
-      ...profileFields,
-      appName: payload.appName,
-      transportationName: payload.transportationName,
-      currency: payload.currency,
+      appName: sanitizeString(payload.appName) || "Vehicle Calculation System",
+      transportationName: sanitizeString(payload.transportationName),
+      currency: payload.currency || "INR",
       defaultVehicleId: payload.defaultVehicleId,
-      fullName: payload.fullName,
-      mobileNumber: payload.mobileNumber,
-      businessName: payload.businessName,
-      address: payload.address,
-      contactNumber: payload.contactNumber,
-      businessEmail: payload.businessEmail,
-      updatedAt: (data as SettingsRow | null)?.updated_at ?? current.updatedAt,
+      fullName: sanitizeString(payload.fullName),
+      mobileNumber: sanitizeNumber(payload.mobileNumber),
+      businessName: sanitizeString(payload.businessName),
+      address: sanitizeString(payload.address),
+      contactNumber: sanitizeNumber(payload.contactNumber),
+      businessEmail: sanitizeEmail(payload.businessEmail),
+      updatedAt: new Date().toISOString(),
     };
+
+    setUserSettings(user.id, updated);
+    return updated;
   },
 };

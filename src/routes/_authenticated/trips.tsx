@@ -27,6 +27,7 @@ import type { Trip } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/trips")({
+  ssr: false,
   head: () => ({
     meta: [
       { title: "Trips — Jay Mataji Transport" },

@@ -36,7 +36,10 @@ export async function listTrips(req: Request, res: Response) {
 
 export async function listTripsByVehicle(req: Request, res: Response) {
   const vehicleId = objectId.parse(req.params.vehicleId);
-  const trips = await Trip.find({ vehicleId, userId: req.authUser!.id }).sort({ date: -1, createdAt: -1 });
+  const trips = await Trip.find({ vehicleId, userId: req.authUser!.id }).sort({
+    date: -1,
+    createdAt: -1,
+  });
   res.json({ success: true, data: trips });
 }
 

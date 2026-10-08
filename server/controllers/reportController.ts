@@ -64,7 +64,8 @@ export async function getReport(req: Request, res: Response) {
     success: true,
     data: {
       vehicleId,
-      vehicleLabel: vehicleId === "all" ? "All Vehicles" : (vehicleName.get(vehicleId) ?? "Unknown vehicle"),
+      vehicleLabel:
+        vehicleId === "all" ? "All Vehicles" : (vehicleName.get(vehicleId) ?? "Unknown vehicle"),
       fromDate,
       toDate,
       summary,

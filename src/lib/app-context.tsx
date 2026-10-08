@@ -12,6 +12,7 @@ interface AppContextValue {
   vehiclesError: Error | null;
   settings: AppSettings | undefined;
   appName: string;
+  userName: string;
   symbol: string;
   selectedVehicleId: string;
   setSelectedVehicleId: (id: string) => void;
@@ -66,6 +67,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       vehiclesError: (vehiclesQuery.error as Error | null) ?? null,
       settings,
       appName: settings?.transportationName || settings?.appName || "Vehicle Calculation System",
+      userName: settings?.fullName || "",
       symbol: currencySymbol(settings?.currency ?? "INR"),
       selectedVehicleId,
       setSelectedVehicleId,

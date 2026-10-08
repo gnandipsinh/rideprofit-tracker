@@ -9,7 +9,9 @@ export class HttpError extends Error {
   }
 }
 
-export function asyncHandler<T extends (req: Request, res: Response, next: NextFunction) => Promise<unknown>>(fn: T) {
+export function asyncHandler<
+  T extends (req: Request, res: Response, next: NextFunction) => Promise<unknown>,
+>(fn: T) {
   return (req: Request, res: Response, next: NextFunction) => {
     fn(req, res, next).catch(next);
   };
@@ -32,5 +34,7 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
   }
   const message = err instanceof Error ? err.message : "Unexpected server error";
   console.error("[error]", message);
-  return res.status(500).json({ success: false, message: "Something went wrong. Please try again." });
+  return res
+    .status(500)
+    .json({ success: false, message: "Something went wrong. Please try again." });
 }

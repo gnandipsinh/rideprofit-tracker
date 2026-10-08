@@ -16,6 +16,7 @@ import { ALL_VEHICLES } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/reports")({
+  ssr: false,
   head: () => ({
     meta: [
       { title: "Reports — Jay Mataji Transport" },

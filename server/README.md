@@ -28,16 +28,16 @@ build variable.
 
 ## Endpoints
 
-| Method | Path |
-| --- | --- |
-| GET | `/api/health` |
-| GET/POST | `/api/vehicles` |
-| GET/PUT/DELETE | `/api/vehicles/:id` |
-| GET | `/api/vehicles/:vehicleId/trips` |
-| GET/POST | `/api/trips` (query: `vehicleId`, `fromDate`, `toDate`, `page`, `limit`) |
-| GET/PUT/DELETE | `/api/trips/:id` |
-| GET | `/api/reports?vehicleId=&fromDate=&toDate=` |
-| GET/PUT | `/api/settings` |
+| Method         | Path                                                                     |
+| -------------- | ------------------------------------------------------------------------ |
+| GET            | `/api/health`                                                            |
+| GET/POST       | `/api/vehicles`                                                          |
+| GET/PUT/DELETE | `/api/vehicles/:id`                                                      |
+| GET            | `/api/vehicles/:vehicleId/trips`                                         |
+| GET/POST       | `/api/trips` (query: `vehicleId`, `fromDate`, `toDate`, `page`, `limit`) |
+| GET/PUT/DELETE | `/api/trips/:id`                                                         |
+| GET            | `/api/reports?vehicleId=&fromDate=&toDate=`                              |
+| GET/PUT        | `/api/settings`                                                          |
 
 Deleting a vehicle also deletes its trips. Derived amounts (`otherExpenses`,
 `totalExpense`, `profit`) are always recomputed on the server.

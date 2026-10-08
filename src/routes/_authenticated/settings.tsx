@@ -30,6 +30,7 @@ const CURRENCIES = [
 const NO_DEFAULT = "none";
 
 export const Route = createFileRoute("/_authenticated/settings")({
+  ssr: false,
   head: () => ({
     meta: [
       { title: "Settings — Jay Mataji Transport" },

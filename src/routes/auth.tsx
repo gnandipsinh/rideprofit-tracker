@@ -34,6 +34,7 @@ import {
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/auth")({
+  ssr: false,
   head: () => ({
     meta: [
       { title: "Jay Mataji Transport — Fleet Accounting" },
@@ -174,6 +175,12 @@ export default function AuthPage() {
   }, [cooldown]);
 
   useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      if (data?.user) {
+        navigate({ to: "/", replace: true });
+      }
+    });
+
     const { data } = supabase.auth.onAuthStateChange((event) => {
       if (event === "PASSWORD_RECOVERY") {
         setStep("reset");
@@ -226,10 +233,8 @@ export default function AuthPage() {
       }
       setPassword("");
       setConfirmPassword("");
-      setEmailLinkPurpose("register");
-      setCooldown(RESEND_COOLDOWN_SECONDS);
-      reset("email-link");
-      toast.success(`Confirmation link sent to ${parsed.data.email}`);
+      toast.success("Account created successfully! Welcome to Jay Mataji Transport.");
+      navigate({ to: "/", replace: true });
     } catch {
       setFormError(GENERIC_ERROR);
     } finally {
@@ -317,10 +322,8 @@ export default function AuthPage() {
       if (error) {
         setFormError(safeAuthMessage(error.message));
       } else {
-        setEmailLinkPurpose("reset");
-        setCooldown(RESEND_COOLDOWN_SECONDS);
-        setForgotState("confirmation");
-        toast.success("Password reset link sent");
+        toast.success("Verification confirmed! You can now set a new password.");
+        setStep("reset");
       }
     } finally {
       requestInFlight.current = false;
@@ -732,6 +735,13 @@ export default function AuthPage() {
                     : emailLinkPurpose === "register"
                       ? "Resend Confirmation Email"
                       : "Resend Login Email"}
+              </Button>
+              <Button
+                type="button"
+                onClick={() => navigate({ to: "/", replace: true })}
+                className="h-12 w-full rounded-xl text-sm font-bold bg-primary text-primary-foreground"
+              >
+                Proceed to Dashboard
               </Button>
               <Button
                 type="button"

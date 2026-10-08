@@ -36,6 +36,7 @@ import { todayInput } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/")({
+  ssr: false,
   head: () => ({
     meta: [
       { title: "Dashboard — Jay Mataji Transport" },
@@ -65,6 +66,7 @@ function Dashboard() {
   const {
     symbol,
     appName,
+    userName,
     selectedVehicleId,
     isAllVehicles,
     vehicles,
@@ -132,7 +134,10 @@ function Dashboard() {
       <div className="page-stack">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-xl font-extrabold sm:text-2xl">{getGreeting()}</h2>
+            <h2 className="text-xl font-extrabold sm:text-2xl">
+              {getGreeting()}
+              {userName ? `, ${userName}` : ""}
+            </h2>
             <p className="text-sm text-muted-foreground">{appName}</p>
           </div>
           <div className="flex items-center gap-2">

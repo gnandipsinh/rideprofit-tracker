@@ -36,6 +36,7 @@ import { aggregate } from "@/lib/calc";
 import { formatDateShort, formatMoney } from "@/lib/format";
 
 export const Route = createFileRoute("/_authenticated/vehicles")({
+  ssr: false,
   head: () => ({
     meta: [
       { title: "Vehicles — Jay Mataji Transport" },

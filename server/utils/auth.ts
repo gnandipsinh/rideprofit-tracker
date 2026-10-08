@@ -20,7 +20,10 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     req.authUser = user;
     return next();
   } catch (error) {
-    console.error("[auth] failed to validate session", error instanceof Error ? error.message : error);
+    console.error(
+      "[auth] failed to validate session",
+      error instanceof Error ? error.message : error,
+    );
     return res.status(503).json({ message: "Authentication service is temporarily unavailable." });
   }
 }
