@@ -6,6 +6,7 @@ import {
   useRouter,
   HeadContent,
   Scripts,
+  type ErrorComponentProps,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
 
@@ -37,7 +38,7 @@ function NotFoundComponent() {
   );
 }
 
-function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
+function ErrorComponent({ error, reset }: ErrorComponentProps) {
   console.error(error);
   const router = useRouter();
   useEffect(() => {
@@ -76,20 +77,25 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
 }
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
+  ssr: false,
   head: () => ({
     meta: [
       { charSet: "utf-8" },
-      { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Vehicle Calculation System" },
+      {
+        name: "viewport",
+        content: "width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover",
+      },
+      { title: "Eicher Calculation" },
       {
         name: "description",
         content:
-          "Vehicle-wise trip accounting: income, diesel, driver payment, EMI share, profit and PDF reports.",
+          "Vehicle-wise trip accounting and profit calculation system with multi-vehicle tracking, expense management, and PDF reports.",
       },
-      { property: "og:title", content: "Vehicle Calculation System" },
+      { property: "og:title", content: "Eicher Calculation" },
       {
         property: "og:description",
-        content: "Track trips, expenses and profit for every vehicle in your fleet.",
+        content:
+          "Vehicle-wise trip accounting and profit calculation system with multi-vehicle tracking, expense management, and PDF reports.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -128,7 +134,7 @@ function RootComponent() {
   const router = useRouter();
 
   useEffect(() => {
-    const { data } = supabase.auth.onAuthStateChange((event) => {
+    const { data } = supabase.auth.onAuthStateChange((event: string) => {
       if (event !== "SIGNED_IN" && event !== "SIGNED_OUT" && event !== "USER_UPDATED") return;
       void router.invalidate();
       if (event === "SIGNED_OUT") queryClient.clear();

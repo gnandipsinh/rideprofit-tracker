@@ -19,8 +19,11 @@ dist-ssr
 .env.local
 .env.*.local
 
-# Wrangler / Cloudflare
+# Build & cache
+.aistudio
+*.pdf
 .wrangler/
+.vercel
 .dev.vars
 
 # Editor directories and files

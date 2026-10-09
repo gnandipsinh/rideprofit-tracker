@@ -7,13 +7,11 @@ import {
   Route as RouteIcon,
   FileText,
   Settings as SettingsIcon,
-  Plus,
   PlugZap,
   X,
   LogOut,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { TripFormDialog } from "@/components/TripFormDialog";
 import { supabase } from "@/integrations/supabase/client";
 import { useApp } from "@/lib/app-context";
 import { useHealth } from "@/lib/queries";
@@ -29,15 +27,14 @@ const NAV = [
 
 export function AppShell({
   children,
-  showAddTrip = true,
+  showAddTrip: _showAddTrip,
 }: {
   children: ReactNode;
   showAddTrip?: boolean;
 }) {
-  const { appName, activeVehicles } = useApp();
+  const { appName } = useApp();
   const health = useHealth();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const [tripOpen, setTripOpen] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const navigate = useNavigate();
@@ -59,18 +56,28 @@ export function AppShell({
   }
 
   return (
-    <div className="min-h-screen pb-24 pb-[env(safe-area-inset-bottom)] md:pb-8">
-      <header className="sticky top-0 z-30 border-b border-border/70 bg-background/86 backdrop-blur-xl">
-        <div className="app-container grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-3 md:py-4">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-primary/15 text-primary shadow-[var(--shadow-gold)] ring-1 ring-primary/35">
-              <Truck className="h-6 w-6" />
+    <div
+      className="min-h-screen flex flex-col md:pb-10"
+      style={{
+        paddingBottom: "calc(5.5rem + env(safe-area-inset-bottom, 0px))",
+      }}
+    >
+      <header
+        className="sticky top-0 z-30 border-b border-border/80 bg-background/95 backdrop-blur-xl"
+        style={{
+          paddingTop: "env(safe-area-inset-top, 0px)",
+        }}
+      >
+        <div className="app-container grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 py-2.5 sm:py-3 md:py-4">
+          <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
+            <div className="grid h-10 w-10 sm:h-11 sm:w-11 shrink-0 place-items-center rounded-2xl bg-primary/15 text-primary shadow-[var(--shadow-gold)] ring-1 ring-primary/35">
+              <Truck className="h-5 w-5 sm:h-6 sm:w-6" />
             </div>
             <div className="min-w-0">
-              <h1 className="truncate text-base font-extrabold leading-tight sm:text-lg md:text-xl">
+              <h1 className="truncate text-sm sm:text-base md:text-xl font-extrabold leading-tight">
                 {appName}
               </h1>
-              <p className="truncate text-[0.65rem] font-bold uppercase tracking-[0.28em] text-primary/85">
+              <p className="truncate text-[0.62rem] sm:text-[0.65rem] font-bold uppercase tracking-[0.24em] sm:tracking-[0.28em] text-primary/85">
                 Fleet Accounting
               </p>
             </div>
@@ -108,7 +115,7 @@ export function AppShell({
       </header>
 
       {offline && !dismissed ? (
-        <div className="app-container pt-4">
+        <div className="app-container pt-3 sm:pt-4">
           <div className="flex items-start gap-3 rounded-2xl border border-border/70 bg-secondary/40 p-3">
             <PlugZap className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
             <div className="min-w-0 text-xs text-foreground/90">
@@ -137,23 +144,13 @@ export function AppShell({
         </div>
       ) : null}
 
-      <main className="app-container py-4 md:py-6">{children}</main>
-
-      {showAddTrip && activeVehicles.length > 0 ? (
-        <>
-          <Button
-            onClick={() => setTripOpen(true)}
-            className="fixed bottom-24 right-4 z-30 h-14 rounded-full px-5 text-sm font-bold shadow-[var(--shadow-gold)] md:bottom-8 md:right-8 pb-1"
-          >
-            <Plus className="mr-1.5 h-5 w-5" /> Add Trip
-          </Button>
-          <TripFormDialog open={tripOpen} onOpenChange={setTripOpen} />
-        </>
-      ) : null}
+      <main className="app-container flex-1 py-3 sm:py-5 md:py-6">{children}</main>
 
       <nav
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-border/70 bg-background/95 shadow-[0_-18px_40px_-28px_#39c9ff] backdrop-blur-xl md:hidden"
-        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-border/80 bg-background/96 shadow-[0_-18px_40px_-28px_#39c9ff] backdrop-blur-xl md:hidden"
+        style={{
+          paddingBottom: "max(env(safe-area-inset-bottom, 0px), 6px)",
+        }}
       >
         <div className="mx-auto grid max-w-lg grid-cols-5">
           {NAV.map((item) => {
@@ -164,17 +161,17 @@ export function AppShell({
                 key={item.to}
                 to={item.to}
                 className={cn(
-                  "flex min-h-[4.15rem] flex-col items-center justify-center gap-1 px-1 py-2 text-[0.65rem] font-semibold tap-scale active:scale-95",
-                  active ? "text-primary" : "text-muted-foreground",
+                  "flex min-h-[3.9rem] flex-col items-center justify-center gap-1 px-1 py-1.5 text-[0.65rem] font-semibold tap-scale active:scale-95",
+                  active ? "text-primary font-bold" : "text-muted-foreground",
                 )}
               >
                 <span
                   className={cn(
-                    "grid h-8 w-8 place-items-center rounded-xl border border-transparent",
+                    "grid h-7 w-7 place-items-center rounded-xl border border-transparent",
                     active && "border-primary/30 bg-primary/15 shadow-[var(--shadow-gold)]",
                   )}
                 >
-                  <Icon className="h-[18px] w-[18px]" />
+                  <Icon className="h-4 w-4" />
                 </span>
                 <span className="truncate">{item.label}</span>
               </Link>

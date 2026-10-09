@@ -126,8 +126,9 @@ function createProductionAuth() {
       }
 
       const meta = options?.data || {};
-      const fullName = typeof meta.full_name === "string" ? meta.full_name.trim() : "";
-      const mobile = typeof meta.mobile === "string" ? meta.mobile.trim() : "";
+      const fullName =
+        typeof meta["full_name"] === "string" ? (meta["full_name"] as string).trim() : "";
+      const mobile = typeof meta["mobile"] === "string" ? (meta["mobile"] as string).trim() : "";
       const userId = generateUserId();
 
       const newUser: RealUser = {
@@ -335,9 +336,14 @@ function isDummySupabaseUrl(url: string | undefined): boolean {
 }
 
 function createSupabaseClient() {
-  const SUPABASE_URL = import.meta.env["VITE_SUPABASE_URL"] || process.env["SUPABASE_URL"];
+  const SUPABASE_URL =
+    import.meta.env["VITE_SUPABASE_URL"] ||
+    (typeof process !== "undefined" && process?.env ? process.env["SUPABASE_URL"] : undefined);
   const SUPABASE_PUBLISHABLE_KEY =
-    import.meta.env["VITE_SUPABASE_PUBLISHABLE_KEY"] || process.env["SUPABASE_PUBLISHABLE_KEY"];
+    import.meta.env["VITE_SUPABASE_PUBLISHABLE_KEY"] ||
+    (typeof process !== "undefined" && process?.env
+      ? process.env["SUPABASE_PUBLISHABLE_KEY"]
+      : undefined);
 
   const useLocal = isDummySupabaseUrl(SUPABASE_URL) || !SUPABASE_PUBLISHABLE_KEY;
 

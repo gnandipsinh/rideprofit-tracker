@@ -175,13 +175,13 @@ export default function AuthPage() {
   }, [cooldown]);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      if (data?.user) {
+    supabase.auth.getUser().then((res: { data: { user: unknown } }) => {
+      if (res.data?.user) {
         navigate({ to: "/", replace: true });
       }
     });
 
-    const { data } = supabase.auth.onAuthStateChange((event) => {
+    const { data } = supabase.auth.onAuthStateChange((event: string) => {
       if (event === "PASSWORD_RECOVERY") {
         setStep("reset");
       } else if (event === "SIGNED_IN") {

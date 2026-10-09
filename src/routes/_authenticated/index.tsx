@@ -132,16 +132,16 @@ function Dashboard() {
   return (
     <AppShell>
       <div className="page-stack">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h2 className="text-xl font-extrabold sm:text-2xl">
+        <div className="flex items-center justify-between gap-2.5">
+          <div className="min-w-0">
+            <h2 className="truncate text-lg sm:text-xl md:text-2xl font-extrabold">
               {getGreeting()}
               {userName ? `, ${userName}` : ""}
             </h2>
-            <p className="text-sm text-muted-foreground">{appName}</p>
+            <p className="truncate text-xs sm:text-sm text-muted-foreground">{appName}</p>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="glass-card rounded-xl px-3 py-2 text-xs font-semibold text-muted-foreground sm:px-4">
+          <div className="flex shrink-0 items-center gap-2">
+            <div className="glass-card rounded-xl px-2.5 py-1.5 text-xs font-semibold text-muted-foreground sm:px-3 sm:py-2">
               <Calendar className="mr-1.5 inline h-3.5 w-3.5 text-primary" />
               {presetLabel}
             </div>
@@ -150,15 +150,17 @@ function Dashboard() {
 
         <VehicleSelector />
 
-        <div className="glass-card rounded-2xl p-3">
-          <div className="flex flex-wrap gap-2">
+        <div className="glass-card rounded-2xl p-2.5 sm:p-3">
+          <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar py-0.5">
             {DASHBOARD_PRESETS.map((p) => (
               <button
                 key={p.value}
                 onClick={() => setPreset(p.value)}
                 className={cn(
-                  "tap-scale min-h-[44px] rounded-full border border-border px-4 py-2 text-xs font-semibold text-muted-foreground",
-                  preset === p.value && "border-primary/50 bg-primary/15 text-primary",
+                  "tap-scale shrink-0 min-h-[38px] sm:min-h-[42px] rounded-full border border-border px-3.5 sm:px-4 py-1.5 text-xs font-semibold text-muted-foreground transition-all",
+                  preset === p.value
+                    ? "border-primary/50 bg-primary/15 text-primary shadow-[var(--shadow-gold)] font-bold"
+                    : "hover:bg-secondary/60 hover:text-foreground",
                 )}
               >
                 {p.label}
@@ -166,18 +168,18 @@ function Dashboard() {
             ))}
           </div>
           {preset === "custom" ? (
-            <div className="mt-3 grid grid-cols-2 gap-2">
+            <div className="mt-2.5 grid grid-cols-2 gap-2">
               <Input
                 type="date"
                 value={custom.fromDate}
                 onChange={(e) => setCustom((c) => ({ ...c, fromDate: e.target.value }))}
-                className="h-11 rounded-xl bg-secondary/60"
+                className="h-10 sm:h-11 rounded-xl bg-secondary/60 text-xs sm:text-sm"
               />
               <Input
                 type="date"
                 value={custom.toDate}
                 onChange={(e) => setCustom((c) => ({ ...c, toDate: e.target.value }))}
-                className="h-11 rounded-xl bg-secondary/60"
+                className="h-10 sm:h-11 rounded-xl bg-secondary/60 text-xs sm:text-sm"
               />
             </div>
           ) : null}
@@ -335,7 +337,12 @@ function Dashboard() {
               <EmptyState
                 icon={<RouteIcon className="h-6 w-6" />}
                 title="No trips in this period"
-                description="Use the Add Trip button to record income and expenses for a day."
+                description="Record trips in the Trips section to see income and expenses for this period."
+                action={
+                  <Button asChild className="h-10 rounded-xl px-4 font-semibold">
+                    <Link to="/trips">Go to Trips</Link>
+                  </Button>
+                }
               />
             ) : (
               <>

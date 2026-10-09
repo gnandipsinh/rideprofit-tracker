@@ -89,7 +89,9 @@ function SettingsPage() {
   }, [settings, hydrated]);
 
   useEffect(() => {
-    void supabase.auth.getUser().then(({ data }) => setEmail(data.user?.email ?? ""));
+    void supabase.auth.getUser().then((res: { data: { user: { email?: string } | null } }) => {
+      setEmail(res.data.user?.email ?? "");
+    });
   }, []);
 
   const submit = () => {
