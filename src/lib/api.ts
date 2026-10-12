@@ -44,11 +44,139 @@ async function getAuthenticatedUser() {
   return user;
 }
 
-/* ---------------- Real User Data Storage (Strictly Isolated by User ID) ---------------- */
+/* ---------------- Real User Data Storage & Cloud Synchronization ---------------- */
 
 const VEHICLES_PREFIX = "vcs.data.vehicles.";
 const TRIPS_PREFIX = "vcs.data.trips.";
 const SETTINGS_PREFIX = "vcs.data.settings.";
+const BACKEND_URL_KEY = "vcs.config.api_url";
+
+export function getApiBaseUrl(): string {
+  if (typeof window !== "undefined") {
+    const custom = window.localStorage.getItem(BACKEND_URL_KEY);
+    if (custom) return custom.trim().replace(/\/+$/, "");
+  }
+  const envUrl =
+    import.meta.env["VITE_API_URL"] ||
+    (typeof process !== "undefined" && process?.env ? process.env["VITE_API_URL"] : "");
+  return (envUrl || "").trim().replace(/\/+$/, "");
+}
+
+export function setApiBaseUrl(url: string): void {
+  if (typeof window === "undefined") return;
+  if (!url) {
+    window.localStorage.removeItem(BACKEND_URL_KEY);
+  } else {
+    window.localStorage.setItem(BACKEND_URL_KEY, url.trim().replace(/\/+$/, ""));
+  }
+}
+
+export interface UserDataBackup {
+  version: 1;
+  exportDate: string;
+  userId: string;
+  email?: string;
+  vehicles: Vehicle[];
+  trips: Trip[];
+  settings: AppSettings;
+}
+
+export function exportLocalUserData(userId: string): UserDataBackup {
+  return {
+    version: 1,
+    exportDate: new Date().toISOString(),
+    userId,
+    vehicles: getUserVehicles(userId),
+    trips: getUserTrips(userId),
+    settings: getUserSettings(userId),
+  };
+}
+
+export function importLocalUserData(
+  targetUserId: string,
+  backup: Partial<UserDataBackup>,
+): { importedVehicles: number; importedTrips: number } {
+  const existingVehicles = getUserVehicles(targetUserId);
+  const existingTrips = getUserTrips(targetUserId);
+
+  const vehicleIdMap = new Map<string, string>(); // oldId -> newId
+  const newVehicles: Vehicle[] = [...existingVehicles];
+
+  if (Array.isArray(backup.vehicles)) {
+    for (const v of backup.vehicles) {
+      const match = existingVehicles.find(
+        (ev) =>
+          ev._id === v._id ||
+          (ev.vehicleNumber && v.vehicleNumber && ev.vehicleNumber === v.vehicleNumber),
+      );
+      if (match) {
+        vehicleIdMap.set(v._id, match._id);
+      } else {
+        const freshId = v._id || generateEntityId("veh");
+        vehicleIdMap.set(v._id, freshId);
+        newVehicles.push({
+          _id: freshId,
+          name: sanitizeString(v.name),
+          type: sanitizeString(v.type),
+          model: sanitizeString(v.model ?? ""),
+          vehicleNumber: sanitizeString(v.vehicleNumber ?? ""),
+          notes: sanitizeString(v.notes ?? ""),
+          isActive: v.isActive ?? true,
+          createdAt: v.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+      }
+    }
+    setUserVehicles(targetUserId, newVehicles);
+  }
+
+  const newTrips: Trip[] = [...existingTrips];
+  if (Array.isArray(backup.trips)) {
+    for (const t of backup.trips) {
+      const mappedVehId = vehicleIdMap.get(t.vehicleId) || t.vehicleId;
+      const match = existingTrips.find(
+        (et) =>
+          et._id === t._id ||
+          (et.vehicleId === mappedVehId && et.date === t.date && et.income === t.income),
+      );
+      if (!match) {
+        const items: OtherExpenseItem[] = (t.otherExpenseItems || []).map((i) => ({
+          name: sanitizeString(i.name),
+          amount: Number(i.amount) || 0,
+        }));
+        newTrips.push({
+          _id: t._id || generateEntityId("trip"),
+          vehicleId: mappedVehId,
+          date: t.date,
+          income: Number(t.income) || 0,
+          diesel: Number(t.diesel) || 0,
+          driverPayment: Number(t.driverPayment) || 0,
+          emiShare: Number(t.emiShare) || 0,
+          otherExpenseItems: items,
+          otherExpenses: t.otherExpenses || sumOtherExpenses(items),
+          notes: sanitizeString(t.notes ?? ""),
+          createdAt: t.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+      }
+    }
+    setUserTrips(targetUserId, newTrips);
+  }
+
+  if (backup.settings) {
+    const current = getUserSettings(targetUserId);
+    setUserSettings(targetUserId, {
+      ...current,
+      ...backup.settings,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
+  return {
+    importedVehicles: newVehicles.length - existingVehicles.length,
+    importedTrips: newTrips.length - existingTrips.length,
+  };
+}
 
 function generateEntityId(prefix: string): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -57,7 +185,7 @@ function generateEntityId(prefix: string): string {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function getUserVehicles(userId: string): Vehicle[] {
+export function getUserVehicles(userId: string): Vehicle[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = window.localStorage.getItem(VEHICLES_PREFIX + userId);
@@ -67,7 +195,7 @@ function getUserVehicles(userId: string): Vehicle[] {
   }
 }
 
-function setUserVehicles(userId: string, list: Vehicle[]): void {
+export function setUserVehicles(userId: string, list: Vehicle[]): void {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(VEHICLES_PREFIX + userId, JSON.stringify(list));
@@ -76,7 +204,7 @@ function setUserVehicles(userId: string, list: Vehicle[]): void {
   }
 }
 
-function getUserTrips(userId: string): Trip[] {
+export function getUserTrips(userId: string): Trip[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = window.localStorage.getItem(TRIPS_PREFIX + userId);
@@ -86,7 +214,7 @@ function getUserTrips(userId: string): Trip[] {
   }
 }
 
-function setUserTrips(userId: string, list: Trip[]): void {
+export function setUserTrips(userId: string, list: Trip[]): void {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(TRIPS_PREFIX + userId, JSON.stringify(list));
@@ -95,7 +223,7 @@ function setUserTrips(userId: string, list: Trip[]): void {
   }
 }
 
-function getUserSettings(
+export function getUserSettings(
   userId: string,
   userMeta?: Record<string, unknown>,
   userEmail?: string,
@@ -140,7 +268,7 @@ function getUserSettings(
   }
 }
 
-function setUserSettings(userId: string, settings: AppSettings): void {
+export function setUserSettings(userId: string, settings: AppSettings): void {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(SETTINGS_PREFIX + userId, JSON.stringify(settings));
@@ -149,22 +277,102 @@ function setUserSettings(userId: string, settings: AppSettings): void {
   }
 }
 
+async function requestBackend<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const baseUrl = getApiBaseUrl();
+  if (!baseUrl) throw new Error("No backend API configured");
+
+  let token = "";
+  try {
+    const sessionRes = await (
+      supabase.auth as unknown as {
+        getSession?: () => Promise<{ data: { session?: { access_token?: string } } }>;
+      }
+    ).getSession?.();
+    token = sessionRes?.data?.session?.access_token || "";
+  } catch {
+    /* ignore */
+  }
+
+  const res = await fetch(`${baseUrl}${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...options.headers,
+    },
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: res.statusText }));
+    throw new ApiError(err.message || `Request failed with status ${res.status}`, res.status);
+  }
+
+  const json = await res.json();
+  return json.data !== undefined ? json.data : json;
+}
+
 /* ---------------- API Object ---------------- */
 
 export const api = {
-  health: async () => {
-    return { status: "ok", database: "connected" };
+  health: async (): Promise<{ status: string; database: string; url?: string }> => {
+    const baseUrl = getApiBaseUrl();
+    if (baseUrl) {
+      try {
+        const res = await fetch(`${baseUrl}/api/health`, { signal: AbortSignal.timeout(4000) });
+        if (res.ok) {
+          const json = await res.json();
+          return {
+            status: "connected",
+            database: json?.data?.database || "connected",
+            url: baseUrl,
+          };
+        }
+      } catch {
+        /* fall through to local status */
+      }
+    }
+    return { status: "local", database: "browser-storage" };
   },
 
   listVehicles: async (): Promise<Vehicle[]> => {
     const user = await getAuthenticatedUser();
     if (!user) return [];
+
+    const baseUrl = getApiBaseUrl();
+    if (baseUrl) {
+      try {
+        const data = await requestBackend<Vehicle[]>("/api/vehicles");
+        if (Array.isArray(data)) {
+          setUserVehicles(user.id, data);
+          return data;
+        }
+      } catch (e) {
+        console.warn("[api] listVehicles fallback to local cache:", e);
+      }
+    }
+
     return getUserVehicles(user.id);
   },
 
   createVehicle: async (payload: VehiclePayload): Promise<Vehicle> => {
     const user = await getAuthenticatedUser();
     if (!user) throw new ApiError("Authentication required", 401);
+
+    const baseUrl = getApiBaseUrl();
+    if (baseUrl) {
+      try {
+        const created = await requestBackend<Vehicle>("/api/vehicles", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        const list = getUserVehicles(user.id);
+        list.push(created);
+        setUserVehicles(user.id, list);
+        return created;
+      } catch (e) {
+        console.warn("[api] createVehicle fallback to local storage:", e);
+      }
+    }
 
     const list = getUserVehicles(user.id);
     const now = new Date().toISOString();
@@ -188,6 +396,23 @@ export const api = {
   updateVehicle: async (id: string, payload: VehiclePayload): Promise<Vehicle> => {
     const user = await getAuthenticatedUser();
     if (!user) throw new ApiError("Authentication required", 401);
+
+    const baseUrl = getApiBaseUrl();
+    if (baseUrl) {
+      try {
+        const updated = await requestBackend<Vehicle>(`/api/vehicles/${id}`, {
+          method: "PUT",
+          body: JSON.stringify(payload),
+        });
+        const list = getUserVehicles(user.id);
+        const idx = list.findIndex((v) => v._id === id);
+        if (idx !== -1) list[idx] = updated;
+        setUserVehicles(user.id, list);
+        return updated;
+      } catch (e) {
+        console.warn("[api] updateVehicle fallback to local storage:", e);
+      }
+    }
 
     const list = getUserVehicles(user.id);
     const idx = list.findIndex((v) => v._id === id);
@@ -213,6 +438,22 @@ export const api = {
     const user = await getAuthenticatedUser();
     if (!user) throw new ApiError("Authentication required", 401);
 
+    const baseUrl = getApiBaseUrl();
+    if (baseUrl) {
+      try {
+        const res = await requestBackend<{ deletedTrips: number }>(`/api/vehicles/${id}`, {
+          method: "DELETE",
+        });
+        const vehicles = getUserVehicles(user.id).filter((v) => v._id !== id);
+        setUserVehicles(user.id, vehicles);
+        const trips = getUserTrips(user.id).filter((t) => t.vehicleId !== id);
+        setUserTrips(user.id, trips);
+        return res;
+      } catch (e) {
+        console.warn("[api] deleteVehicle fallback to local storage:", e);
+      }
+    }
+
     const vehicles = getUserVehicles(user.id).filter((v) => v._id !== id);
     setUserVehicles(user.id, vehicles);
 
@@ -234,6 +475,16 @@ export const api = {
       list[idx]!.isActive = isActive;
       list[idx]!.updatedAt = new Date().toISOString();
       setUserVehicles(user.id, list);
+      if (getApiBaseUrl()) {
+        try {
+          await requestBackend(`/api/vehicles/${id}`, {
+            method: "PUT",
+            body: JSON.stringify(list[idx]),
+          });
+        } catch {
+          /* ignore */
+        }
+      }
     }
   },
 
@@ -244,6 +495,25 @@ export const api = {
   }): Promise<Trip[]> => {
     const user = await getAuthenticatedUser();
     if (!user) return [];
+
+    const baseUrl = getApiBaseUrl();
+    if (baseUrl) {
+      try {
+        const query = new URLSearchParams();
+        if (params.vehicleId && params.vehicleId !== ALL_VEHICLES) {
+          query.set("vehicleId", params.vehicleId);
+        }
+        if (params.fromDate) query.set("fromDate", params.fromDate);
+        if (params.toDate) query.set("toDate", params.toDate);
+
+        const data = await requestBackend<Trip[]>(`/api/trips?${query.toString()}`);
+        if (Array.isArray(data)) {
+          return data;
+        }
+      } catch (e) {
+        console.warn("[api] listTrips fallback to local cache:", e);
+      }
+    }
 
     let trips = getUserTrips(user.id);
 
@@ -263,6 +533,22 @@ export const api = {
   createTrip: async (payload: TripPayload): Promise<Trip> => {
     const user = await getAuthenticatedUser();
     if (!user) throw new ApiError("Authentication required", 401);
+
+    const baseUrl = getApiBaseUrl();
+    if (baseUrl) {
+      try {
+        const created = await requestBackend<Trip>("/api/trips", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        const list = getUserTrips(user.id);
+        list.unshift(created);
+        setUserTrips(user.id, list);
+        return created;
+      } catch (e) {
+        console.warn("[api] createTrip fallback to local storage:", e);
+      }
+    }
 
     const list = getUserTrips(user.id);
     const now = new Date().toISOString();
@@ -294,6 +580,23 @@ export const api = {
     const user = await getAuthenticatedUser();
     if (!user) throw new ApiError("Authentication required", 401);
 
+    const baseUrl = getApiBaseUrl();
+    if (baseUrl) {
+      try {
+        const updated = await requestBackend<Trip>(`/api/trips/${id}`, {
+          method: "PUT",
+          body: JSON.stringify(payload),
+        });
+        const list = getUserTrips(user.id);
+        const idx = list.findIndex((t) => t._id === id);
+        if (idx !== -1) list[idx] = updated;
+        setUserTrips(user.id, list);
+        return updated;
+      } catch (e) {
+        console.warn("[api] updateTrip fallback to local storage:", e);
+      }
+    }
+
     const list = getUserTrips(user.id);
     const idx = list.findIndex((t) => t._id === id);
     if (idx === -1) throw new ApiError("Trip not found", 404);
@@ -324,6 +627,15 @@ export const api = {
   deleteTrip: async (id: string): Promise<{ _id: string }> => {
     const user = await getAuthenticatedUser();
     if (!user) throw new ApiError("Authentication required", 401);
+
+    const baseUrl = getApiBaseUrl();
+    if (baseUrl) {
+      try {
+        await requestBackend(`/api/trips/${id}`, { method: "DELETE" });
+      } catch (e) {
+        console.warn("[api] deleteTrip fallback to local storage:", e);
+      }
+    }
 
     const list = getUserTrips(user.id).filter((t) => t._id !== id);
     setUserTrips(user.id, list);
@@ -392,6 +704,20 @@ export const api = {
   getSettings: async (): Promise<AppSettings> => {
     const user = await getAuthenticatedUser();
     if (!user) throw new ApiError("Authentication required", 401);
+
+    const baseUrl = getApiBaseUrl();
+    if (baseUrl) {
+      try {
+        const data = await requestBackend<AppSettings>("/api/settings");
+        if (data && typeof data === "object") {
+          setUserSettings(user.id, data);
+          return data;
+        }
+      } catch (e) {
+        console.warn("[api] getSettings fallback to local cache:", e);
+      }
+    }
+
     return getUserSettings(user.id, user.user_metadata, user.email);
   },
 
@@ -409,6 +735,20 @@ export const api = {
   }): Promise<AppSettings> => {
     const user = await getAuthenticatedUser();
     if (!user) throw new ApiError("Authentication required", 401);
+
+    const baseUrl = getApiBaseUrl();
+    if (baseUrl) {
+      try {
+        const updated = await requestBackend<AppSettings>("/api/settings", {
+          method: "PUT",
+          body: JSON.stringify(payload),
+        });
+        setUserSettings(user.id, updated);
+        return updated;
+      } catch (e) {
+        console.warn("[api] updateSettings fallback to local storage:", e);
+      }
+    }
 
     const current = getUserSettings(user.id, user.user_metadata, user.email);
     const updated: AppSettings = {
