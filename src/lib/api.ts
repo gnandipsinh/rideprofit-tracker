@@ -529,22 +529,28 @@ export const api = {
     const user = await getAuthenticatedUser();
     if (!user) throw new ApiError("Authentication required", 401);
 
+    const baseUrl = getApiBaseUrl();
+    if (baseUrl) {
+      await requestBackend(`/api/vehicles/${id}`, {
+        method: "PUT",
+        body: JSON.stringify({ isActive }),
+      });
+      const list = getUserVehicles(user.id);
+      const idx = list.findIndex((v) => v._id === id);
+      if (idx !== -1) {
+        list[idx]!.isActive = isActive;
+        list[idx]!.updatedAt = new Date().toISOString();
+        setUserVehicles(user.id, list);
+      }
+      return;
+    }
+
     const list = getUserVehicles(user.id);
     const idx = list.findIndex((v) => v._id === id);
     if (idx !== -1) {
       list[idx]!.isActive = isActive;
       list[idx]!.updatedAt = new Date().toISOString();
       setUserVehicles(user.id, list);
-      if (getApiBaseUrl()) {
-        try {
-          await requestBackend(`/api/vehicles/${id}`, {
-            method: "PUT",
-            body: JSON.stringify(list[idx]),
-          });
-        } catch {
-          /* ignore */
-        }
-      }
     }
   },
 
