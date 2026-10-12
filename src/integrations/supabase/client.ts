@@ -27,6 +27,35 @@ export interface RealSession {
 const USERS_STORAGE_KEY = "vcs.auth.accounts";
 const SESSION_STORAGE_KEY = "vcs.auth.active_session";
 const RESET_STORAGE_KEY = "vcs.auth.password_reset_email";
+const PENDING_TOKENS_STORAGE_KEY = "vcs.auth.pending_login_tokens";
+
+export interface PendingLoginToken {
+  token: string;
+  email: string;
+  userId: string;
+  expiresAt: number;
+  used: boolean;
+  createdAt: number;
+}
+
+export function loadPendingTokens(): PendingLoginToken[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(PENDING_TOKENS_STORAGE_KEY);
+    return raw ? (JSON.parse(raw) as PendingLoginToken[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function savePendingTokens(tokens: PendingLoginToken[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(PENDING_TOKENS_STORAGE_KEY, JSON.stringify(tokens));
+  } catch {
+    /* ignore */
+  }
+}
 
 function generateUserId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -196,12 +225,27 @@ function createProductionAuth() {
       return { data: { user, session }, error: null };
     },
 
-    async signInWithOtp({ email }: { email: string; options?: unknown }) {
+    async signInWithOtp({
+      email,
+      options,
+    }: {
+      email: string;
+      options?: { shouldCreateUser?: boolean; emailRedirectTo?: string };
+    }) {
       const normEmail = email.trim().toLowerCase();
       const accounts = loadAccounts();
       let user = accounts.find((a) => a.email.toLowerCase() === normEmail);
 
       if (!user) {
+        if (options?.shouldCreateUser === false) {
+          return {
+            data: { user: null, session: null },
+            error: {
+              message: "No registered account found with this email. Please sign up first.",
+              status: 404,
+            },
+          };
+        }
         const userId = generateUserId();
         user = {
           id: userId,
@@ -217,6 +261,120 @@ function createProductionAuth() {
         saveAccounts(accounts);
       }
 
+      // Rate limiting: prevent duplicate requests within 60s
+      const pendingTokens = loadPendingTokens();
+      const recent = pendingTokens.find(
+        (t) => t.email === normEmail && !t.used && Date.now() - t.createdAt < 60_000,
+      );
+      if (recent) {
+        return {
+          data: { user: null, session: null },
+          error: {
+            message: "A login link was recently sent. Please wait before requesting another.",
+            status: 429,
+          },
+        };
+      }
+
+      // Generate cryptographically secure random single-use token
+      let token = "";
+      if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+        token = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
+      } else {
+        token = "sec_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
+      }
+
+      const newToken: PendingLoginToken = {
+        token,
+        email: normEmail,
+        userId: user.id,
+        expiresAt: Date.now() + 15 * 60 * 1000, // 15 minutes expiration
+        used: false,
+        createdAt: Date.now(),
+      };
+
+      pendingTokens.push(newToken);
+      savePendingTokens(pendingTokens);
+
+      // SECURITY CRITICAL: DO NOT CREATE ACTIVE SESSION HERE!
+      // The user must click the verification link sent to their email to be authenticated.
+      return { data: { user: null, session: null }, error: null };
+    },
+
+    async verifyOtp({
+      token,
+      token_hash,
+      email,
+    }: {
+      token?: string;
+      token_hash?: string;
+      email?: string;
+      type?: string;
+    }) {
+      const candidateToken = (token || token_hash || "").trim();
+      if (!candidateToken) {
+        return {
+          data: { user: null, session: null },
+          error: { message: "Verification token is required.", status: 400 },
+        };
+      }
+
+      const normEmail = (email || "").trim().toLowerCase();
+      const pendingTokens = loadPendingTokens();
+      const recordIndex = pendingTokens.findIndex(
+        (t) => t.token === candidateToken && (!normEmail || t.email.toLowerCase() === normEmail),
+      );
+
+      if (recordIndex === -1) {
+        return {
+          data: { user: null, session: null },
+          error: {
+            message: "Invalid or unrecognised login token. Please request a new link.",
+            status: 400,
+          },
+        };
+      }
+
+      const record = pendingTokens[recordIndex]!;
+
+      if (record.used) {
+        return {
+          data: { user: null, session: null },
+          error: {
+            message: "This login link has already been used. Please request a new one.",
+            status: 400,
+          },
+        };
+      }
+
+      if (Date.now() > record.expiresAt) {
+        return {
+          data: { user: null, session: null },
+          error: {
+            message:
+              "This login link has expired (links are valid for 15 minutes). Please request a new one.",
+            status: 400,
+          },
+        };
+      }
+
+      // Mark token as consumed immediately so it can never be reused
+      record.used = true;
+      savePendingTokens(pendingTokens);
+
+      // Look up user account
+      const accounts = loadAccounts();
+      const user = accounts.find(
+        (a) => a.id === record.userId || a.email.toLowerCase() === record.email,
+      );
+      if (!user) {
+        return {
+          data: { user: null, session: null },
+          error: { message: "User account could not be found.", status: 404 },
+        };
+      }
+
+      // NOW AND ONLY NOW: create authenticated session
       const session: RealSession = {
         access_token: "jwt_" + user.id + "_" + Date.now(),
         token_type: "bearer",

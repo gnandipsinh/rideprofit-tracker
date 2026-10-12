@@ -17,7 +17,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { supabase } from "@/integrations/supabase/client";
+import { loadPendingTokens, supabase } from "@/integrations/supabase/client";
 import {
   GENERIC_CREDENTIALS_ERROR,
   GENERIC_ERROR,
@@ -175,6 +175,49 @@ export default function AuthPage() {
   }, [cooldown]);
 
   useEffect(() => {
+    // 1. Check for token verification link in URL
+    if (typeof window !== "undefined") {
+      const urlParams = new URLSearchParams(window.location.search);
+      const token = urlParams.get("token") || urlParams.get("token_hash");
+      const emailParam = urlParams.get("email");
+
+      if (token) {
+        setBusy(true);
+        void (
+          supabase.auth as unknown as {
+            verifyOtp: (opts: {
+              token?: string;
+              email?: string;
+              type?: string;
+            }) => Promise<{ error: { message?: string } | null }>;
+          }
+        )
+          .verifyOtp({ token, email: emailParam || undefined, type: "email" })
+          .then((res) => {
+            window.history.replaceState({}, document.title, window.location.pathname);
+            if (res.error) {
+              setFormError(res.error.message || "Invalid or expired login link.");
+              toast.error(res.error.message || "Invalid or expired login link.");
+              setStep("login");
+            } else {
+              toast.success("Login verified successfully! Welcome back.");
+              navigate({ to: "/", replace: true });
+            }
+          })
+          .catch(() => {
+            window.history.replaceState({}, document.title, window.location.pathname);
+            setFormError("Verification failed. Please request a new link.");
+            toast.error("Verification failed. Please request a new link.");
+            setStep("login");
+          })
+          .finally(() => {
+            setBusy(false);
+          });
+        return;
+      }
+    }
+
+    // 2. Check if user already has an active session
     supabase.auth.getUser().then((res: { data: { user: unknown } }) => {
       if (res.data?.user) {
         navigate({ to: "/", replace: true });
@@ -687,33 +730,28 @@ export default function AuthPage() {
                 <MailOpen className="h-8 w-8" />
               </div>
               <div className="space-y-1">
-                <h2 className="text-lg font-semibold">
-                  {emailLinkPurpose === "reset"
-                    ? "Check Your Email"
-                    : emailLinkPurpose === "register"
-                      ? "Check Your Email"
-                      : "Check Your Email"}
-                </h2>
+                <h2 className="text-lg font-semibold">Check your registered email</h2>
                 <p className="text-sm text-muted-foreground">
-                  {emailLinkPurpose === "reset"
-                    ? "We've sent a password reset link to your registered email. Please check your inbox and click the link to continue."
-                    : emailLinkPurpose === "register"
-                      ? "We've sent a confirmation link to your registered email. Please check your inbox and click the link to continue."
-                      : "We've sent a login link to your registered email. Please check your inbox and click the link to continue."}
+                  We've sent a login link to your email. Open your inbox and click the link to
+                  securely sign in.
                 </p>
-                {email && <p className="mt-1 text-xs text-muted-foreground/70">{email}</p>}
+                {email && (
+                  <p className="mt-1 font-medium text-xs text-foreground/80 bg-secondary/50 py-1 px-3 rounded-lg inline-block">
+                    {email}
+                  </p>
+                )}
                 <div className="mt-3 space-y-2 text-left text-xs text-muted-foreground">
                   <div className="flex items-center gap-2">
                     <CheckCircle2 className="h-4 w-4 text-primary" />
-                    <span>Click the link in your email</span>
+                    <span>Open your email inbox and click the secure link</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <CheckCircle2 className="h-4 w-4 text-primary" />
-                    <span>It will securely log you in</span>
+                    <span>Single-use token verifies your identity before login</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <CheckCircle2 className="h-4 w-4 text-primary" />
-                    <span>The link will expire in 15 minutes</span>
+                    <span>The login link expires automatically in 15 minutes</span>
                   </div>
                 </div>
               </div>
@@ -728,20 +766,7 @@ export default function AuthPage() {
                 ) : (
                   <CheckCircle2 className="mr-2 h-4 w-4" />
                 )}
-                {cooldown > 0
-                  ? `${emailLinkPurpose === "reset" ? "Resend Reset Email" : emailLinkPurpose === "register" ? "Resend Confirmation Email" : "Resend Login Email"} in ${cooldown}s`
-                  : emailLinkPurpose === "reset"
-                    ? "Resend Reset Email"
-                    : emailLinkPurpose === "register"
-                      ? "Resend Confirmation Email"
-                      : "Resend Login Email"}
-              </Button>
-              <Button
-                type="button"
-                onClick={() => navigate({ to: "/", replace: true })}
-                className="h-12 w-full rounded-xl text-sm font-bold bg-primary text-primary-foreground"
-              >
-                Proceed to Dashboard
+                {cooldown > 0 ? `Resend Login Email in ${cooldown}s` : "Resend Login Email"}
               </Button>
               <Button
                 type="button"
@@ -752,6 +777,37 @@ export default function AuthPage() {
               >
                 Back to Login
               </Button>
+
+              {(() => {
+                const pending = loadPendingTokens();
+                const latest = pending
+                  .filter(
+                    (t) =>
+                      t.email.toLowerCase() === email.toLowerCase() &&
+                      !t.used &&
+                      Date.now() < t.expiresAt,
+                  )
+                  .sort((a, b) => b.createdAt - a.createdAt)[0];
+                if (!latest) return null;
+                return (
+                  <div className="pt-2 border-t border-border/40 text-left">
+                    <p className="text-[0.7rem] text-muted-foreground mb-1.5 font-medium">
+                      Simulate Inbox Action (Testing / Verification):
+                    </p>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        window.location.href = `/auth?token=${latest.token}&email=${encodeURIComponent(email)}&type=email`;
+                      }}
+                      className="h-9 w-full rounded-xl text-xs font-semibold"
+                    >
+                      Open Email Login Link (Verify Token)
+                    </Button>
+                  </div>
+                );
+              })()}
             </div>
           ) : null}
 
