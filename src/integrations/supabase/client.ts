@@ -24,37 +24,17 @@ export interface RealSession {
   user: RealUser;
 }
 
-const USERS_STORAGE_KEY = "vcs.auth.accounts";
 const SESSION_STORAGE_KEY = "vcs.auth.active_session";
 const RESET_STORAGE_KEY = "vcs.auth.password_reset_email";
-const PENDING_TOKENS_STORAGE_KEY = "vcs.auth.pending_login_tokens";
 
-export interface PendingLoginToken {
+export function loadPendingTokens(): {
   token: string;
   email: string;
-  userId: string;
   expiresAt: number;
   used: boolean;
   createdAt: number;
-}
-
-export function loadPendingTokens(): PendingLoginToken[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(PENDING_TOKENS_STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as PendingLoginToken[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-export function savePendingTokens(tokens: PendingLoginToken[]): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(PENDING_TOKENS_STORAGE_KEY, JSON.stringify(tokens));
-  } catch {
-    /* ignore */
-  }
+}[] {
+  return [];
 }
 
 function generateUserId(email?: string): string {
@@ -72,25 +52,6 @@ function generateUserId(email?: string): string {
     return "usr_" + crypto.randomUUID();
   }
   return "usr_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 9);
-}
-
-function loadAccounts(): RealUser[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(USERS_STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as RealUser[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveAccounts(accounts: RealUser[]): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(accounts));
-  } catch {
-    /* ignore */
-  }
 }
 
 function loadActiveSession(): RealSession | null {
@@ -159,7 +120,6 @@ function createProductionAuth() {
         typeof meta["full_name"] === "string" ? (meta["full_name"] as string).trim() : "";
       const mobile = typeof meta["mobile"] === "string" ? (meta["mobile"] as string).trim() : "";
 
-      // 1. Try server registration
       try {
         const res = await fetch("/api/auth/register", {
           method: "POST",
@@ -167,7 +127,7 @@ function createProductionAuth() {
           body: JSON.stringify({ email: normEmail, password, fullName, mobile }),
         });
         const json = await res.json().catch(() => null);
-        if (json?.data?.user && json?.data?.session) {
+        if (res.ok && json?.data?.user && json?.data?.session) {
           const user: RealUser = {
             ...json.data.user,
             user_metadata: { full_name: fullName, mobile, ...meta },
@@ -177,67 +137,31 @@ function createProductionAuth() {
             ...json.data.session,
             user,
           };
-          const accounts = loadAccounts().filter((a) => a.email.toLowerCase() !== normEmail);
-          accounts.push(user);
-          saveAccounts(accounts);
           saveActiveSession(session);
           notifySubscribers("SIGNED_IN", session);
           return { data: { user, session }, error: null };
         }
-        if (json?.error?.message || json?.message) {
-          return {
-            data: { user: null, session: null },
-            error: {
-              message: json.error?.message || json.message || "Could not create account.",
-              status: res.status,
-            },
-          };
-        }
-      } catch {
-        /* fallback to local storage if offline */
-      }
-
-      const accounts = loadAccounts();
-      const existing = accounts.find((a) => a.email.toLowerCase() === normEmail);
-      if (existing) {
         return {
           data: { user: null, session: null },
-          error: { message: "An account with this email already exists.", status: 400 },
+          error: {
+            message: json?.error?.message || json?.message || "Could not create account.",
+            status: res.status,
+          },
+        };
+      } catch (e) {
+        return {
+          data: { user: null, session: null },
+          error: {
+            message: e instanceof Error ? e.message : "Failed to connect to backend database.",
+            status: 500,
+          },
         };
       }
-
-      const userId = generateUserId(normEmail);
-      const newUser: RealUser = {
-        id: userId,
-        email: normEmail,
-        password: password || "",
-        fullName,
-        mobile,
-        user_metadata: { full_name: fullName, mobile, ...meta },
-        app_metadata: { provider: "email" },
-        createdAt: new Date().toISOString(),
-      };
-      accounts.push(newUser);
-      saveAccounts(accounts);
-
-      const session: RealSession = {
-        access_token: "jwt_" + userId + "_" + Date.now(),
-        token_type: "bearer",
-        expires_in: 3600 * 24 * 30,
-        expires_at: Math.floor(Date.now() / 1000) + 3600 * 24 * 30,
-        refresh_token: "ref_" + userId + "_" + Date.now(),
-        user: newUser,
-      };
-
-      saveActiveSession(session);
-      notifySubscribers("SIGNED_IN", session);
-      return { data: { user: newUser, session }, error: null };
     },
 
     async signInWithPassword({ email, password }: { email: string; password?: string }) {
       const normEmail = email.trim().toLowerCase();
 
-      // 1. Try server login first
       try {
         const res = await fetch("/api/auth/login", {
           method: "POST",
@@ -255,284 +179,162 @@ function createProductionAuth() {
             ...json.data.session,
             user,
           };
-          const accounts = loadAccounts().filter((a) => a.email.toLowerCase() !== normEmail);
-          accounts.push(user);
-          saveAccounts(accounts);
           saveActiveSession(session);
           notifySubscribers("SIGNED_IN", session);
           return { data: { user, session }, error: null };
         }
-        if (!res.ok) {
-          // Server returned explicit authentication error — never create account on login failure!
-          return {
-            data: { user: null, session: null },
-            error: {
-              message: json?.error?.message || json?.message || "Invalid email or password.",
-              status: res.status,
-            },
-          };
-        }
-      } catch {
-        /* only fallback if network request itself threw an exception */
-      }
-
-      const accounts = loadAccounts();
-      const user = accounts.find((a) => a.email.toLowerCase() === normEmail);
-
-      // NEVER CREATE A NEW USER ON LOGIN!
-      if (!user) {
         return {
           data: { user: null, session: null },
-          error: { message: "Invalid email or password.", status: 400 },
+          error: {
+            message: json?.error?.message || json?.message || "Invalid email or password.",
+            status: res.status,
+          },
         };
-      }
-
-      if (user.password && password && user.password !== password) {
+      } catch (e) {
         return {
           data: { user: null, session: null },
-          error: { message: "Invalid email or password.", status: 400 },
+          error: {
+            message: e instanceof Error ? e.message : "Failed to connect to backend database.",
+            status: 500,
+          },
         };
       }
-
-      const session: RealSession = {
-        access_token: "jwt_" + user.id + "_" + Date.now(),
-        token_type: "bearer",
-        expires_in: 3600 * 24 * 30,
-        expires_at: Math.floor(Date.now() / 1000) + 3600 * 24 * 30,
-        refresh_token: "ref_" + user.id + "_" + Date.now(),
-        user,
-      };
-
-      saveActiveSession(session);
-      notifySubscribers("SIGNED_IN", session);
-      return { data: { user, session }, error: null };
     },
 
-    async signInWithOtp({
-      email,
-      options,
-    }: {
-      email: string;
-      options?: { shouldCreateUser?: boolean; emailRedirectTo?: string };
-    }) {
-      const normEmail = email.trim().toLowerCase();
-      const accounts = loadAccounts();
-      let user = accounts.find((a) => a.email.toLowerCase() === normEmail);
-
-      if (!user) {
-        if (options?.shouldCreateUser === false) {
-          return {
-            data: { user: null, session: null },
-            error: {
-              message: "No registered account found with this email. Please sign up first.",
-              status: 404,
-            },
-          };
-        }
-        const userId = generateUserId();
-        user = {
-          id: userId,
-          email: normEmail,
-          password: "",
-          fullName: "",
-          mobile: "",
-          user_metadata: { email: normEmail },
-          app_metadata: { provider: "email" },
-          created_at: new Date().toISOString(),
-        };
-        accounts.push(user);
-        saveAccounts(accounts);
-      }
-
-      // Rate limiting: prevent duplicate requests within 60s
-      const pendingTokens = loadPendingTokens();
-      const recent = pendingTokens.find(
-        (t) => t.email === normEmail && !t.used && Date.now() - t.createdAt < 60_000,
-      );
-      if (recent) {
-        return {
-          data: { user: null, session: null },
-          error: {
-            message: "A login link was recently sent. Please wait before requesting another.",
-            status: 429,
-          },
-        };
-      }
-
-      // Generate cryptographically secure random single-use token
-      let token = "";
-      if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-        token = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
-      } else {
-        token = "sec_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
-      }
-
-      const newToken: PendingLoginToken = {
-        token,
-        email: normEmail,
-        userId: user.id,
-        expiresAt: Date.now() + 15 * 60 * 1000, // 15 minutes expiration
-        used: false,
-        createdAt: Date.now(),
+    async signInWithOtp(_opts: { email: string }) {
+      return {
+        data: { user: null, session: null },
+        error: {
+          message: "Please sign in with your email and password.",
+          status: 400,
+        },
       };
-
-      pendingTokens.push(newToken);
-      savePendingTokens(pendingTokens);
-
-      // SECURITY CRITICAL: DO NOT CREATE ACTIVE SESSION HERE!
-      // The user must click the verification link sent to their email to be authenticated.
-      return { data: { user: null, session: null }, error: null };
     },
 
-    async verifyOtp({
-      token,
-      token_hash,
-      email,
-    }: {
-      token?: string;
-      token_hash?: string;
-      email?: string;
-      type?: string;
-    }) {
-      const candidateToken = (token || token_hash || "").trim();
-      if (!candidateToken) {
-        return {
-          data: { user: null, session: null },
-          error: { message: "Verification token is required.", status: 400 },
-        };
-      }
-
-      const normEmail = (email || "").trim().toLowerCase();
-      const pendingTokens = loadPendingTokens();
-      const recordIndex = pendingTokens.findIndex(
-        (t) => t.token === candidateToken && (!normEmail || t.email.toLowerCase() === normEmail),
-      );
-
-      if (recordIndex === -1) {
-        return {
-          data: { user: null, session: null },
-          error: {
-            message: "Invalid or unrecognised login token. Please request a new link.",
-            status: 400,
-          },
-        };
-      }
-
-      const record = pendingTokens[recordIndex]!;
-
-      if (record.used) {
-        return {
-          data: { user: null, session: null },
-          error: {
-            message: "This login link has already been used. Please request a new one.",
-            status: 400,
-          },
-        };
-      }
-
-      if (Date.now() > record.expiresAt) {
-        return {
-          data: { user: null, session: null },
-          error: {
-            message:
-              "This login link has expired (links are valid for 15 minutes). Please request a new one.",
-            status: 400,
-          },
-        };
-      }
-
-      // Mark token as consumed immediately so it can never be reused
-      record.used = true;
-      savePendingTokens(pendingTokens);
-
-      // Look up user account
-      const accounts = loadAccounts();
-      const user = accounts.find(
-        (a) => a.id === record.userId || a.email.toLowerCase() === record.email,
-      );
-      if (!user) {
-        return {
-          data: { user: null, session: null },
-          error: { message: "User account could not be found.", status: 404 },
-        };
-      }
-
-      // NOW AND ONLY NOW: create authenticated session
-      const session: RealSession = {
-        access_token: "jwt_" + user.id + "_" + Date.now(),
-        token_type: "bearer",
-        expires_in: 3600 * 24 * 30,
-        expires_at: Math.floor(Date.now() / 1000) + 3600 * 24 * 30,
-        refresh_token: "ref_" + user.id + "_" + Date.now(),
-        user,
+    async verifyOtp(_opts: unknown) {
+      return {
+        data: { user: null, session: null },
+        error: {
+          message: "Please sign in with your email and password.",
+          status: 400,
+        },
       };
-
-      saveActiveSession(session);
-      notifySubscribers("SIGNED_IN", session);
-      return { data: { user, session }, error: null };
     },
 
     async resetPasswordForEmail(email: string, _options?: unknown) {
       const normEmail = email.trim().toLowerCase();
-      const accounts = loadAccounts();
-      const user = accounts.find((a) => a.email.toLowerCase() === normEmail);
-
-      if (!user) {
+      try {
+        const res = await fetch("/api/auth/reset-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: normEmail }),
+        });
+        const json = await res.json().catch(() => null);
+        if (!res.ok) {
+          return {
+            data: null,
+            error: {
+              message:
+                json?.error?.message ||
+                json?.message ||
+                "No registered account found with this email.",
+              status: res.status,
+            },
+          };
+        }
+        if (typeof window !== "undefined") {
+          window.localStorage.setItem(RESET_STORAGE_KEY, normEmail);
+        }
+        return { data: {}, error: null };
+      } catch (e) {
         return {
           data: null,
-          error: { message: "No registered account found with this email.", status: 404 },
+          error: {
+            message: e instanceof Error ? e.message : "Failed to connect to backend database.",
+            status: 500,
+          },
         };
       }
-
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(RESET_STORAGE_KEY, normEmail);
-      }
-      return { data: {}, error: null };
     },
 
     async updateUser({ password, data }: { password?: string; data?: Record<string, unknown> }) {
       const session = loadActiveSession();
-      let targetUser = session?.user;
+      const targetUser = session?.user;
 
-      // Check if user is resetting via forgot password
+      let resetEmail = "";
       if (!targetUser && typeof window !== "undefined") {
-        const resetEmail = window.localStorage.getItem(RESET_STORAGE_KEY);
-        if (resetEmail) {
-          const accounts = loadAccounts();
-          targetUser = accounts.find((a) => a.email.toLowerCase() === resetEmail.toLowerCase());
-        }
+        resetEmail = window.localStorage.getItem(RESET_STORAGE_KEY) || "";
       }
 
-      if (!targetUser) {
+      if (!targetUser && !resetEmail) {
         return { data: { user: null }, error: { message: "User not authenticated.", status: 401 } };
       }
 
-      const accounts = loadAccounts();
-      const idx = accounts.findIndex((a) => a.id === targetUser!.id);
-      if (idx >= 0) {
-        if (password) accounts[idx]!.password = password;
-        if (data) {
-          accounts[idx]!.user_metadata = { ...accounts[idx]!.user_metadata, ...data };
-          if (typeof data["full_name"] === "string") accounts[idx]!.fullName = data["full_name"];
-          if (typeof data["mobile"] === "string") accounts[idx]!.mobile = data["mobile"];
+      try {
+        if (targetUser) {
+          const res = await fetch("/api/auth/update", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${session?.access_token || ""}`,
+            },
+            body: JSON.stringify({
+              password,
+              fullName: typeof data?.["full_name"] === "string" ? data["full_name"] : undefined,
+              mobile: typeof data?.["mobile"] === "string" ? data["mobile"] : undefined,
+              user_metadata: data,
+            }),
+          });
+          const json = await res.json().catch(() => null);
+          if (!res.ok) {
+            return {
+              data: { user: null },
+              error: {
+                message: json?.error?.message || json?.message || "Failed to update profile.",
+                status: res.status,
+              },
+            };
+          }
+          const updatedUser: RealUser = {
+            ...json.data.user,
+            user_metadata: { ...json.data.user.user_metadata, ...data },
+          };
+          const newSession: RealSession = {
+            ...(json.data.session || session!),
+            user: updatedUser,
+          };
+          saveActiveSession(newSession);
+          notifySubscribers("USER_UPDATED", newSession);
+          return { data: { user: updatedUser }, error: null };
+        } else if (resetEmail) {
+          const res = await fetch("/api/auth/reset-password", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: resetEmail, newPassword: password }),
+          });
+          const json = await res.json().catch(() => null);
+          if (!res.ok) {
+            return {
+              data: { user: null },
+              error: {
+                message: json?.error?.message || json?.message || "Failed to reset password.",
+                status: res.status,
+              },
+            };
+          }
+          if (typeof window !== "undefined") {
+            window.localStorage.removeItem(RESET_STORAGE_KEY);
+          }
+          return { data: { user: null }, error: null };
         }
-        saveAccounts(accounts);
-        targetUser = accounts[idx]!;
-
-        const newSession: RealSession = {
-          access_token: "jwt_" + targetUser.id + "_" + Date.now(),
-          token_type: "bearer",
-          expires_in: 3600 * 24 * 30,
-          expires_at: Math.floor(Date.now() / 1000) + 3600 * 24 * 30,
-          refresh_token: "ref_" + targetUser.id + "_" + Date.now(),
-          user: targetUser,
+      } catch (e) {
+        return {
+          data: { user: null },
+          error: {
+            message: e instanceof Error ? e.message : "Failed to connect to backend database.",
+            status: 500,
+          },
         };
-        saveActiveSession(newSession);
-        notifySubscribers("USER_UPDATED", newSession);
-        if (typeof window !== "undefined") {
-          window.localStorage.removeItem(RESET_STORAGE_KEY);
-        }
-        return { data: { user: targetUser }, error: null };
       }
 
       return { data: { user: null }, error: { message: "Account record not found.", status: 404 } };

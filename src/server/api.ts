@@ -167,6 +167,75 @@ export async function handleApiFetch(request: Request): Promise<Response> {
     return jsonResponse({ success: true, data: { user: authUser } });
   }
 
+  // 4b. Update user profile/password directly in database
+  if (
+    (path === "/api/auth/update" || path === "/api/auth/profile") &&
+    (method === "POST" || method === "PUT")
+  ) {
+    if (!authUser) return errorResponse("Authentication is required.", 401);
+    const body = (await request.json().catch(() => ({}))) as {
+      password?: string;
+      fullName?: string;
+      mobile?: string;
+      user_metadata?: Record<string, unknown>;
+    };
+    const db = loadDatabase();
+    const userIndex = db.users.findIndex((u) => u.id === authUser.id);
+    if (userIndex === -1) return errorResponse("User not found.", 404);
+
+    if (body.password) {
+      db.users[userIndex].password = body.password;
+    }
+    if (body.fullName !== undefined) {
+      db.users[userIndex].fullName = body.fullName.trim();
+    }
+    if (body.mobile !== undefined) {
+      db.users[userIndex].mobile = body.mobile.trim();
+    }
+
+    // Also sync to settings record if fullName or mobile was updated
+    const sIndex = db.settings.findIndex((s) => s.userId === authUser.id);
+    if (sIndex !== -1) {
+      if (body.fullName) db.settings[sIndex].fullName = body.fullName.trim();
+      if (body.mobile) {
+        db.settings[sIndex].mobileNumber = body.mobile.trim();
+        db.settings[sIndex].contactNumber = body.mobile.trim();
+      }
+    }
+
+    saveDatabase(db);
+    const updatedUser = db.users[userIndex];
+    const session = {
+      access_token: token || `jwt_${updatedUser.id}_${Date.now()}`,
+      token_type: "bearer",
+      expires_in: 3600 * 24 * 30,
+      user: updatedUser,
+    };
+    return jsonResponse({ success: true, data: { user: updatedUser, session } });
+  }
+
+  // 4c. Reset password endpoint
+  if (path === "/api/auth/reset-password" && method === "POST") {
+    const body = (await request.json().catch(() => ({}))) as {
+      email?: string;
+      newPassword?: string;
+    };
+    const email = (body.email || "").trim().toLowerCase();
+    if (!email) return errorResponse("Email is required.", 400);
+
+    const db = loadDatabase();
+    const userIndex = db.users.findIndex((u) => u.email.toLowerCase() === email);
+    if (userIndex === -1) return errorResponse("No registered account found with this email.", 404);
+
+    if (body.newPassword) {
+      db.users[userIndex].password = body.newPassword;
+      saveDatabase(db);
+      return jsonResponse({ success: true, message: "Password updated successfully." });
+    }
+
+    return jsonResponse({ success: true, message: "Account verified for password reset." });
+  }
+
   // 5. Protected routes require valid authenticated user
   if (!authUser) {
     return errorResponse("Authentication is required.", 401);

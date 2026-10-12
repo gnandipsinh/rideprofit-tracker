@@ -44,18 +44,9 @@ async function getAuthenticatedUser() {
   return user;
 }
 
-/* ---------------- Real User Data Storage & Cloud Synchronization ---------------- */
-
-const VEHICLES_PREFIX = "vcs.data.vehicles.";
-const TRIPS_PREFIX = "vcs.data.trips.";
-const SETTINGS_PREFIX = "vcs.data.settings.";
-const BACKEND_URL_KEY = "vcs.config.api_url";
+/* ---------------- Real Database Backend Request Pipeline ---------------- */
 
 export function getApiBaseUrl(): string {
-  if (typeof window !== "undefined") {
-    const custom = window.localStorage.getItem(BACKEND_URL_KEY);
-    if (custom) return custom.trim().replace(/\/+$/, "");
-  }
   const envUrl =
     import.meta.env["VITE_API_URL"] ||
     (typeof process !== "undefined" && process?.env ? process.env["VITE_API_URL"] : "");
@@ -66,247 +57,8 @@ export function getApiBaseUrl(): string {
   return "";
 }
 
-export function setApiBaseUrl(url: string): void {
-  if (typeof window === "undefined") return;
-  if (!url) {
-    window.localStorage.removeItem(BACKEND_URL_KEY);
-  } else {
-    window.localStorage.setItem(BACKEND_URL_KEY, url.trim().replace(/\/+$/, ""));
-  }
-}
-
-export interface UserDataBackup {
-  version: 1;
-  exportDate: string;
-  userId: string;
-  email?: string;
-  vehicles: Vehicle[];
-  trips: Trip[];
-  settings: AppSettings;
-}
-
-export function exportLocalUserData(userId: string): UserDataBackup {
-  return {
-    version: 1,
-    exportDate: new Date().toISOString(),
-    userId,
-    vehicles: getUserVehicles(userId),
-    trips: getUserTrips(userId),
-    settings: getUserSettings(userId),
-  };
-}
-
-export function importLocalUserData(
-  targetUserId: string,
-  backup: Partial<UserDataBackup>,
-): { importedVehicles: number; importedTrips: number } {
-  const existingVehicles = getUserVehicles(targetUserId);
-  const existingTrips = getUserTrips(targetUserId);
-
-  const vehicleIdMap = new Map<string, string>(); // oldId -> newId
-  const newVehicles: Vehicle[] = [...existingVehicles];
-
-  if (Array.isArray(backup.vehicles)) {
-    for (const v of backup.vehicles) {
-      const match = existingVehicles.find(
-        (ev) =>
-          ev._id === v._id ||
-          (ev.vehicleNumber && v.vehicleNumber && ev.vehicleNumber === v.vehicleNumber),
-      );
-      if (match) {
-        vehicleIdMap.set(v._id, match._id);
-      } else {
-        const freshId = v._id || generateEntityId("veh");
-        vehicleIdMap.set(v._id, freshId);
-        newVehicles.push({
-          _id: freshId,
-          name: sanitizeString(v.name),
-          type: sanitizeString(v.type),
-          model: sanitizeString(v.model ?? ""),
-          vehicleNumber: sanitizeString(v.vehicleNumber ?? ""),
-          notes: sanitizeString(v.notes ?? ""),
-          isActive: v.isActive ?? true,
-          createdAt: v.createdAt || new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        });
-      }
-    }
-    setUserVehicles(targetUserId, newVehicles);
-  }
-
-  const newTrips: Trip[] = [...existingTrips];
-  if (Array.isArray(backup.trips)) {
-    for (const t of backup.trips) {
-      const mappedVehId = vehicleIdMap.get(t.vehicleId) || t.vehicleId;
-      const match = existingTrips.find(
-        (et) =>
-          et._id === t._id ||
-          (et.vehicleId === mappedVehId && et.date === t.date && et.income === t.income),
-      );
-      if (!match) {
-        const items: OtherExpenseItem[] = (t.otherExpenseItems || []).map((i) => ({
-          name: sanitizeString(i.name),
-          amount: Number(i.amount) || 0,
-        }));
-        newTrips.push({
-          _id: t._id || generateEntityId("trip"),
-          vehicleId: mappedVehId,
-          date: t.date,
-          income: Number(t.income) || 0,
-          diesel: Number(t.diesel) || 0,
-          driverPayment: Number(t.driverPayment) || 0,
-          emiShare: Number(t.emiShare) || 0,
-          otherExpenseItems: items,
-          otherExpenses: t.otherExpenses || sumOtherExpenses(items),
-          notes: sanitizeString(t.notes ?? ""),
-          createdAt: t.createdAt || new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        });
-      }
-    }
-    setUserTrips(targetUserId, newTrips);
-  }
-
-  if (backup.settings) {
-    const current = getUserSettings(targetUserId);
-    setUserSettings(targetUserId, {
-      ...current,
-      ...backup.settings,
-      updatedAt: new Date().toISOString(),
-    });
-  }
-
-  return {
-    importedVehicles: newVehicles.length - existingVehicles.length,
-    importedTrips: newTrips.length - existingTrips.length,
-  };
-}
-
-function generateEntityId(prefix: string): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return `${prefix}_${crypto.randomUUID()}`;
-  }
-  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-export function getUserVehicles(userId: string): Vehicle[] {
-  if (typeof window === "undefined" || !userId) return [];
-  try {
-    const raw = window.localStorage.getItem(VEHICLES_PREFIX + userId);
-    if (raw) return JSON.parse(raw) as Vehicle[];
-    return [];
-  } catch {
-    return [];
-  }
-}
-
-export function setUserVehicles(userId: string, list: Vehicle[]): void {
-  if (typeof window === "undefined" || !userId) return;
-  try {
-    window.localStorage.setItem(VEHICLES_PREFIX + userId, JSON.stringify(list));
-  } catch {
-    /* ignore */
-  }
-}
-
-export function getUserTrips(userId: string): Trip[] {
-  if (typeof window === "undefined" || !userId) return [];
-  try {
-    const raw = window.localStorage.getItem(TRIPS_PREFIX + userId);
-    if (raw) return JSON.parse(raw) as Trip[];
-    return [];
-  } catch {
-    return [];
-  }
-}
-
-export function setUserTrips(userId: string, list: Trip[]): void {
-  if (typeof window === "undefined" || !userId) return;
-  try {
-    window.localStorage.setItem(TRIPS_PREFIX + userId, JSON.stringify(list));
-  } catch {
-    /* ignore */
-  }
-}
-
-export function getUserSettings(
-  userId: string,
-  userMeta?: Record<string, unknown>,
-  userEmail?: string,
-): AppSettings {
-  const realFullName =
-    typeof userMeta?.["full_name"] === "string" ? userMeta["full_name"].trim() : "";
-  const realMobile = typeof userMeta?.["mobile"] === "string" ? userMeta["mobile"].trim() : "";
-  const realEmail = userEmail || "";
-
-  const defaultProfile: AppSettings = {
-    _id: "settings_" + userId,
-    appName: realFullName ? `${realFullName}'s Fleet` : "Vehicle Calculation System",
-    transportationName: realFullName ? `${realFullName}'s Transport` : "",
-    currency: "INR",
-    defaultVehicleId: null,
-    fullName: realFullName,
-    mobileNumber: realMobile,
-    businessName: realFullName ? `${realFullName} Logistics` : "",
-    address: "",
-    contactNumber: realMobile,
-    businessEmail: realEmail,
-    updatedAt: new Date().toISOString(),
-  };
-
-  if (typeof window === "undefined") return defaultProfile;
-  try {
-    const raw = window.localStorage.getItem(SETTINGS_PREFIX + userId);
-    if (!raw) {
-      window.localStorage.setItem(SETTINGS_PREFIX + userId, JSON.stringify(defaultProfile));
-      return defaultProfile;
-    }
-    const saved = JSON.parse(raw) as Partial<AppSettings>;
-    return {
-      ...defaultProfile,
-      ...saved,
-      fullName: saved.fullName || realFullName,
-      mobileNumber: saved.mobileNumber || realMobile,
-      businessEmail: saved.businessEmail || realEmail,
-    };
-  } catch {
-    return defaultProfile;
-  }
-}
-
-export function setUserSettings(userId: string, settings: AppSettings): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(SETTINGS_PREFIX + userId, JSON.stringify(settings));
-  } catch {
-    /* ignore */
-  }
-}
-
-export async function syncLocalUserDataToServer(userId: string): Promise<boolean> {
-  if (!userId) return false;
-  const localVehicles = getUserVehicles(userId);
-  const localTrips = getUserTrips(userId);
-  const localSettings = getUserSettings(userId);
-
-  if (localVehicles.length === 0 && localTrips.length === 0) {
-    return false;
-  }
-
-  try {
-    await requestBackend("/api/sync", {
-      method: "POST",
-      body: JSON.stringify({
-        vehicles: localVehicles,
-        trips: localTrips,
-        settings: localSettings,
-      }),
-    });
-    return true;
-  } catch (e) {
-    console.warn("[api] auto sync local records to server failed:", e);
-    return false;
-  }
+export function setApiBaseUrl(_url: string): void {
+  // Configured automatically via environment or window origin
 }
 
 async function requestBackend<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -346,7 +98,7 @@ async function requestBackend<T>(path: string, options: RequestInit = {}): Promi
   return json.data !== undefined ? json.data : json;
 }
 
-/* ---------------- API Object ---------------- */
+/* ---------------- Strict Database-Only API ---------------- */
 
 export const api = {
   health: async (): Promise<{ status: string; database: string; url?: string }> => {
@@ -363,134 +115,55 @@ export const api = {
         };
       }
     } catch {
-      /* fall through to local status */
+      /* fall through */
     }
-    return { status: "local", database: "browser-storage" };
+    return { status: "error", database: "disconnected" };
   },
 
   listVehicles: async (): Promise<Vehicle[]> => {
     const user = await getAuthenticatedUser();
     if (!user) return [];
 
-    try {
-      const data = await requestBackend<Vehicle[]>("/api/vehicles");
-      if (Array.isArray(data)) {
-        const local = getUserVehicles(user.id);
-        if (data.length === 0 && local.length > 0) {
-          // Upload local legacy vehicles to backend
-          await syncLocalUserDataToServer(user.id);
-          const refetched = await requestBackend<Vehicle[]>("/api/vehicles");
-          if (Array.isArray(refetched) && refetched.length > 0) {
-            setUserVehicles(user.id, refetched);
-            return refetched;
-          }
-        } else if (local.length > 0) {
-          // Check for any unsynced offline records
-          const unsynced = local.filter(
-            (lv) =>
-              !data.some(
-                (sv) =>
-                  sv._id === lv._id ||
-                  (sv.vehicleNumber && lv.vehicleNumber && sv.vehicleNumber === lv.vehicleNumber),
-              ),
-          );
-          if (unsynced.length > 0) {
-            await syncLocalUserDataToServer(user.id);
-            const refetched = await requestBackend<Vehicle[]>("/api/vehicles");
-            if (Array.isArray(refetched)) {
-              setUserVehicles(user.id, refetched);
-              return refetched;
-            }
-          }
-        }
-
-        setUserVehicles(user.id, data);
-        return data;
-      }
-    } catch (e) {
-      console.warn("[api] listVehicles fallback to local cache:", e);
+    const data = await requestBackend<Vehicle[]>("/api/vehicles");
+    if (!Array.isArray(data)) {
+      throw new ApiError("Invalid response from database", 500);
     }
-
-    return getUserVehicles(user.id);
+    return data;
   },
 
   createVehicle: async (payload: VehiclePayload): Promise<Vehicle> => {
     const user = await getAuthenticatedUser();
     if (!user) throw new ApiError("Authentication required", 401);
 
-    const baseUrl = getApiBaseUrl();
-    if (baseUrl) {
-      try {
-        const created = await requestBackend<Vehicle>("/api/vehicles", {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
-        const list = getUserVehicles(user.id);
-        list.push(created);
-        setUserVehicles(user.id, list);
-        return created;
-      } catch (e) {
-        console.warn("[api] createVehicle fallback to local storage:", e);
-      }
-    }
-
-    const list = getUserVehicles(user.id);
-    const now = new Date().toISOString();
-    const newVehicle: Vehicle = {
-      _id: generateEntityId("veh"),
-      name: sanitizeString(payload.name),
-      type: sanitizeString(payload.type),
-      model: sanitizeString(payload.model ?? ""),
-      vehicleNumber: sanitizeString(payload.vehicleNumber ?? ""),
-      notes: sanitizeString(payload.notes ?? ""),
-      isActive: payload.isActive ?? true,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    list.push(newVehicle);
-    setUserVehicles(user.id, list);
-    return newVehicle;
+    const created = await requestBackend<Vehicle>("/api/vehicles", {
+      method: "POST",
+      body: JSON.stringify({
+        name: sanitizeString(payload.name),
+        type: sanitizeString(payload.type),
+        model: sanitizeString(payload.model ?? ""),
+        vehicleNumber: sanitizeString(payload.vehicleNumber ?? ""),
+        notes: sanitizeString(payload.notes ?? ""),
+        isActive: payload.isActive ?? true,
+      }),
+    });
+    return created;
   },
 
   updateVehicle: async (id: string, payload: VehiclePayload): Promise<Vehicle> => {
     const user = await getAuthenticatedUser();
     if (!user) throw new ApiError("Authentication required", 401);
 
-    const baseUrl = getApiBaseUrl();
-    if (baseUrl) {
-      try {
-        const updated = await requestBackend<Vehicle>(`/api/vehicles/${id}`, {
-          method: "PUT",
-          body: JSON.stringify(payload),
-        });
-        const list = getUserVehicles(user.id);
-        const idx = list.findIndex((v) => v._id === id);
-        if (idx !== -1) list[idx] = updated;
-        setUserVehicles(user.id, list);
-        return updated;
-      } catch (e) {
-        console.warn("[api] updateVehicle fallback to local storage:", e);
-      }
-    }
-
-    const list = getUserVehicles(user.id);
-    const idx = list.findIndex((v) => v._id === id);
-    if (idx === -1) throw new ApiError("Vehicle not found", 404);
-
-    const updated: Vehicle = {
-      ...list[idx]!,
-      name: sanitizeString(payload.name),
-      type: sanitizeString(payload.type),
-      model: sanitizeString(payload.model ?? ""),
-      vehicleNumber: sanitizeString(payload.vehicleNumber ?? ""),
-      notes: sanitizeString(payload.notes ?? ""),
-      isActive: typeof payload.isActive === "boolean" ? payload.isActive : list[idx]!.isActive,
-      updatedAt: new Date().toISOString(),
-    };
-
-    list[idx] = updated;
-    setUserVehicles(user.id, list);
+    const updated = await requestBackend<Vehicle>(`/api/vehicles/${id}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        name: sanitizeString(payload.name),
+        type: sanitizeString(payload.type),
+        model: sanitizeString(payload.model ?? ""),
+        vehicleNumber: sanitizeString(payload.vehicleNumber ?? ""),
+        notes: sanitizeString(payload.notes ?? ""),
+        isActive: payload.isActive,
+      }),
+    });
     return updated;
   },
 
@@ -498,60 +171,20 @@ export const api = {
     const user = await getAuthenticatedUser();
     if (!user) throw new ApiError("Authentication required", 401);
 
-    const baseUrl = getApiBaseUrl();
-    if (baseUrl) {
-      try {
-        const res = await requestBackend<{ deletedTrips: number }>(`/api/vehicles/${id}`, {
-          method: "DELETE",
-        });
-        const vehicles = getUserVehicles(user.id).filter((v) => v._id !== id);
-        setUserVehicles(user.id, vehicles);
-        const trips = getUserTrips(user.id).filter((t) => t.vehicleId !== id);
-        setUserTrips(user.id, trips);
-        return res;
-      } catch (e) {
-        console.warn("[api] deleteVehicle fallback to local storage:", e);
-      }
-    }
-
-    const vehicles = getUserVehicles(user.id).filter((v) => v._id !== id);
-    setUserVehicles(user.id, vehicles);
-
-    const trips = getUserTrips(user.id);
-    const remainingTrips = trips.filter((t) => t.vehicleId !== id);
-    const deletedTrips = trips.length - remainingTrips.length;
-    setUserTrips(user.id, remainingTrips);
-
-    return { deletedTrips };
+    const res = await requestBackend<{ deletedTrips: number }>(`/api/vehicles/${id}`, {
+      method: "DELETE",
+    });
+    return res;
   },
 
   toggleVehicleStatus: async (id: string, isActive: boolean): Promise<void> => {
     const user = await getAuthenticatedUser();
     if (!user) throw new ApiError("Authentication required", 401);
 
-    const baseUrl = getApiBaseUrl();
-    if (baseUrl) {
-      await requestBackend(`/api/vehicles/${id}`, {
-        method: "PUT",
-        body: JSON.stringify({ isActive }),
-      });
-      const list = getUserVehicles(user.id);
-      const idx = list.findIndex((v) => v._id === id);
-      if (idx !== -1) {
-        list[idx]!.isActive = isActive;
-        list[idx]!.updatedAt = new Date().toISOString();
-        setUserVehicles(user.id, list);
-      }
-      return;
-    }
-
-    const list = getUserVehicles(user.id);
-    const idx = list.findIndex((v) => v._id === id);
-    if (idx !== -1) {
-      list[idx]!.isActive = isActive;
-      list[idx]!.updatedAt = new Date().toISOString();
-      setUserVehicles(user.id, list);
-    }
+    await requestBackend(`/api/vehicles/${id}`, {
+      method: "PUT",
+      body: JSON.stringify({ isActive }),
+    });
   },
 
   listTrips: async (
@@ -564,159 +197,69 @@ export const api = {
     const user = await getAuthenticatedUser();
     if (!user) return [];
 
-    try {
-      const query = new URLSearchParams();
-      if (params.vehicleId && params.vehicleId !== ALL_VEHICLES) {
-        query.set("vehicleId", params.vehicleId);
-      }
-      if (params.fromDate) query.set("fromDate", params.fromDate);
-      if (params.toDate) query.set("toDate", params.toDate);
-
-      const qs = query.toString();
-      const path = qs ? `/api/trips?${qs}` : "/api/trips";
-      const data = await requestBackend<Trip[]>(path);
-      if (Array.isArray(data)) {
-        const isUnfiltered =
-          (!params.vehicleId || params.vehicleId === ALL_VEHICLES) &&
-          !params.fromDate &&
-          !params.toDate;
-
-        if (isUnfiltered) {
-          const local = getUserTrips(user.id);
-          if (data.length === 0 && local.length > 0) {
-            // Upload local legacy trips to backend
-            await syncLocalUserDataToServer(user.id);
-            const refetched = await requestBackend<Trip[]>("/api/trips");
-            if (Array.isArray(refetched) && refetched.length > 0) {
-              setUserTrips(user.id, refetched);
-              return refetched;
-            }
-          } else if (local.length > 0) {
-            // Check for any unsynced local trips
-            const unsynced = local.filter((lt) => !data.some((st) => st._id === lt._id));
-            if (unsynced.length > 0) {
-              await syncLocalUserDataToServer(user.id);
-              const refetched = await requestBackend<Trip[]>("/api/trips");
-              if (Array.isArray(refetched)) {
-                setUserTrips(user.id, refetched);
-                return refetched;
-              }
-            }
-          }
-          setUserTrips(user.id, data);
-        }
-        return data;
-      }
-    } catch (e) {
-      console.warn("[api] listTrips fallback to local cache:", e);
-    }
-
-    let trips = getUserTrips(user.id);
-
+    const query = new URLSearchParams();
     if (params.vehicleId && params.vehicleId !== ALL_VEHICLES) {
-      trips = trips.filter((t) => t.vehicleId === params.vehicleId);
+      query.set("vehicleId", params.vehicleId);
     }
-    if (params.fromDate) {
-      trips = trips.filter((t) => t.date >= params.fromDate!);
-    }
-    if (params.toDate) {
-      trips = trips.filter((t) => t.date <= params.toDate!);
-    }
+    if (params.fromDate) query.set("fromDate", params.fromDate);
+    if (params.toDate) query.set("toDate", params.toDate);
 
-    return trips.sort((a, b) => b.date.localeCompare(a.date));
+    const qs = query.toString();
+    const path = qs ? `/api/trips?${qs}` : "/api/trips";
+    const data = await requestBackend<Trip[]>(path);
+    if (!Array.isArray(data)) {
+      throw new ApiError("Invalid response from database", 500);
+    }
+    return data;
   },
 
   createTrip: async (payload: TripPayload): Promise<Trip> => {
     const user = await getAuthenticatedUser();
     if (!user) throw new ApiError("Authentication required", 401);
 
-    const baseUrl = getApiBaseUrl();
-    if (baseUrl) {
-      try {
-        const created = await requestBackend<Trip>("/api/trips", {
-          method: "POST",
-          body: JSON.stringify(payload),
-        });
-        const list = getUserTrips(user.id);
-        list.unshift(created);
-        setUserTrips(user.id, list);
-        return created;
-      } catch (e) {
-        console.warn("[api] createTrip fallback to local storage:", e);
-      }
-    }
-
-    const list = getUserTrips(user.id);
-    const now = new Date().toISOString();
     const items: OtherExpenseItem[] = (payload.otherExpenseItems || [])
       .filter((i) => i.name.trim() || Number(i.amount) > 0)
       .map((i) => ({ name: sanitizeString(i.name), amount: Number(i.amount) || 0 }));
 
-    const newTrip: Trip = {
-      _id: generateEntityId("trip"),
-      vehicleId: payload.vehicleId,
-      date: payload.date,
-      income: Number(payload.income) || 0,
-      diesel: Number(payload.diesel) || 0,
-      driverPayment: Number(payload.driverPayment) || 0,
-      emiShare: Number(payload.emiShare) || 0,
-      otherExpenseItems: items,
-      otherExpenses: sumOtherExpenses(items),
-      notes: sanitizeString(payload.notes ?? ""),
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    list.unshift(newTrip);
-    setUserTrips(user.id, list);
-    return newTrip;
+    const created = await requestBackend<Trip>("/api/trips", {
+      method: "POST",
+      body: JSON.stringify({
+        vehicleId: payload.vehicleId,
+        date: payload.date,
+        income: Number(payload.income) || 0,
+        diesel: Number(payload.diesel) || 0,
+        driverPayment: Number(payload.driverPayment) || 0,
+        emiShare: Number(payload.emiShare) || 0,
+        otherExpenseItems: items,
+        otherExpenses: sumOtherExpenses(items),
+        notes: sanitizeString(payload.notes ?? ""),
+      }),
+    });
+    return created;
   },
 
   updateTrip: async (id: string, payload: TripPayload): Promise<Trip> => {
     const user = await getAuthenticatedUser();
     if (!user) throw new ApiError("Authentication required", 401);
 
-    const baseUrl = getApiBaseUrl();
-    if (baseUrl) {
-      try {
-        const updated = await requestBackend<Trip>(`/api/trips/${id}`, {
-          method: "PUT",
-          body: JSON.stringify(payload),
-        });
-        const list = getUserTrips(user.id);
-        const idx = list.findIndex((t) => t._id === id);
-        if (idx !== -1) list[idx] = updated;
-        setUserTrips(user.id, list);
-        return updated;
-      } catch (e) {
-        console.warn("[api] updateTrip fallback to local storage:", e);
-      }
-    }
-
-    const list = getUserTrips(user.id);
-    const idx = list.findIndex((t) => t._id === id);
-    if (idx === -1) throw new ApiError("Trip not found", 404);
-
     const items: OtherExpenseItem[] = (payload.otherExpenseItems || [])
       .filter((i) => i.name.trim() || Number(i.amount) > 0)
       .map((i) => ({ name: sanitizeString(i.name), amount: Number(i.amount) || 0 }));
 
-    const updated: Trip = {
-      ...list[idx]!,
-      vehicleId: payload.vehicleId,
-      date: payload.date,
-      income: Number(payload.income) || 0,
-      diesel: Number(payload.diesel) || 0,
-      driverPayment: Number(payload.driverPayment) || 0,
-      emiShare: Number(payload.emiShare) || 0,
-      otherExpenseItems: items,
-      otherExpenses: sumOtherExpenses(items),
-      notes: sanitizeString(payload.notes ?? ""),
-      updatedAt: new Date().toISOString(),
-    };
-
-    list[idx] = updated;
-    setUserTrips(user.id, list);
+    const updated = await requestBackend<Trip>(`/api/trips/${id}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        vehicleId: payload.vehicleId,
+        date: payload.date,
+        income: Number(payload.income) || 0,
+        diesel: Number(payload.diesel) || 0,
+        driverPayment: Number(payload.driverPayment) || 0,
+        emiShare: Number(payload.emiShare) || 0,
+        otherExpenseItems: items,
+        otherExpenses: sumOtherExpenses(items),
+        notes: sanitizeString(payload.notes ?? ""),
+      }),
+    });
     return updated;
   },
 
@@ -724,17 +267,7 @@ export const api = {
     const user = await getAuthenticatedUser();
     if (!user) throw new ApiError("Authentication required", 401);
 
-    const baseUrl = getApiBaseUrl();
-    if (baseUrl) {
-      try {
-        await requestBackend(`/api/trips/${id}`, { method: "DELETE" });
-      } catch (e) {
-        console.warn("[api] deleteTrip fallback to local storage:", e);
-      }
-    }
-
-    const list = getUserTrips(user.id).filter((t) => t._id !== id);
-    setUserTrips(user.id, list);
+    await requestBackend(`/api/trips/${id}`, { method: "DELETE" });
     return { _id: id };
   },
 
@@ -801,20 +334,11 @@ export const api = {
     const user = await getAuthenticatedUser();
     if (!user) throw new ApiError("Authentication required", 401);
 
-    const baseUrl = getApiBaseUrl();
-    if (baseUrl) {
-      try {
-        const data = await requestBackend<AppSettings>("/api/settings");
-        if (data && typeof data === "object") {
-          setUserSettings(user.id, data);
-          return data;
-        }
-      } catch (e) {
-        console.warn("[api] getSettings fallback to local cache:", e);
-      }
+    const data = await requestBackend<AppSettings>("/api/settings");
+    if (!data || typeof data !== "object") {
+      throw new ApiError("Invalid settings response from database", 500);
     }
-
-    return getUserSettings(user.id, user.user_metadata, user.email);
+    return data;
   },
 
   updateSettings: async (payload: {
@@ -832,44 +356,25 @@ export const api = {
     const user = await getAuthenticatedUser();
     if (!user) throw new ApiError("Authentication required", 401);
 
-    const baseUrl = getApiBaseUrl();
-    if (baseUrl) {
-      try {
-        const updated = await requestBackend<AppSettings>("/api/settings", {
-          method: "PUT",
-          body: JSON.stringify(payload),
-        });
-        setUserSettings(user.id, updated);
-        return updated;
-      } catch (e) {
-        console.warn("[api] updateSettings fallback to local storage:", e);
-      }
-    }
-
-    const current = getUserSettings(user.id, user.user_metadata, user.email);
     const unifiedName =
       sanitizeString(payload.transportationName || payload.businessName || payload.appName) ||
-      current.transportationName ||
-      current.businessName ||
-      current.appName ||
-      "Vehicle Calculation System";
+      "Jay Mataji Transport";
 
-    const updated: AppSettings = {
-      ...current,
-      appName: unifiedName,
-      transportationName: unifiedName,
-      businessName: unifiedName,
-      currency: payload.currency || "INR",
-      defaultVehicleId: payload.defaultVehicleId,
-      fullName: sanitizeString(payload.fullName),
-      mobileNumber: sanitizeNumber(payload.mobileNumber),
-      address: sanitizeString(payload.address),
-      contactNumber: sanitizeNumber(payload.contactNumber),
-      businessEmail: sanitizeEmail(payload.businessEmail),
-      updatedAt: new Date().toISOString(),
-    };
-
-    setUserSettings(user.id, updated);
+    const updated = await requestBackend<AppSettings>("/api/settings", {
+      method: "PUT",
+      body: JSON.stringify({
+        appName: unifiedName,
+        transportationName: unifiedName,
+        businessName: unifiedName,
+        currency: payload.currency || "INR",
+        defaultVehicleId: payload.defaultVehicleId,
+        fullName: sanitizeString(payload.fullName),
+        mobileNumber: sanitizeNumber(payload.mobileNumber),
+        address: sanitizeString(payload.address),
+        contactNumber: sanitizeNumber(payload.contactNumber),
+        businessEmail: sanitizeEmail(payload.businessEmail),
+      }),
+    });
     return updated;
   },
 };

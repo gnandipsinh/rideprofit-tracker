@@ -3,8 +3,6 @@ import { useSettings, useVehicles } from "./queries";
 import { currencySymbol } from "./format";
 import { ALL_VEHICLES, type AppSettings, type Vehicle } from "./types";
 
-const SELECTED_KEY = "vcs.selectedVehicleId";
-
 interface AppContextValue {
   vehicles: Vehicle[];
   activeVehicles: Vehicle[];
@@ -32,29 +30,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const activeVehicles = useMemo(() => vehicles.filter((v) => v.isActive), [vehicles]);
   const settings = settingsQuery.data;
 
-  // Restore last selection among active vehicles only; inactive vehicles are not selectable.
+  // Restore selection among active vehicles using database defaultVehicleId preference
   useEffect(() => {
     if (vehicles.length === 0) return;
     const ids = activeVehicles.map((v) => v._id);
     if (
       selectedVehicleId &&
       (selectedVehicleId === ALL_VEHICLES || ids.includes(selectedVehicleId))
-    )
+    ) {
       return;
+    }
 
-    const stored = typeof window !== "undefined" ? window.localStorage.getItem(SELECTED_KEY) : null;
     const next =
-      stored && (stored === ALL_VEHICLES || ids.includes(stored))
-        ? stored
-        : settings?.defaultVehicleId && ids.includes(settings.defaultVehicleId)
-          ? settings.defaultVehicleId
-          : ids[0];
+      settings?.defaultVehicleId && ids.includes(settings.defaultVehicleId)
+        ? settings.defaultVehicleId
+        : ids[0];
     setSelected(next ?? "");
   }, [vehicles, activeVehicles, settings?.defaultVehicleId, selectedVehicleId]);
 
   const setSelectedVehicleId = (id: string) => {
     setSelected(id);
-    if (typeof window !== "undefined") window.localStorage.setItem(SELECTED_KEY, id);
   };
 
   const value = useMemo<AppContextValue>(() => {
