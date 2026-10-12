@@ -9,8 +9,42 @@
       "createdAt": "2026-10-12T12:34:24.341Z"
     }
   ],
-  "vehicles": [],
-  "trips": [],
+  "vehicles": [
+    {
+      "_id": "veh_04d18eb8-ed3b-4725-b16f-4fba0685f4f4",
+      "userId": "usr_43cef6eb",
+      "name": "Eicher 1110",
+      "type": "Truck",
+      "model": "2024",
+      "vehicleNumber": "GJ01XY9999",
+      "notes": "",
+      "isActive": true,
+      "createdAt": "2026-10-12T13:13:40.890Z",
+      "updatedAt": "2026-10-12T13:13:40.890Z"
+    }
+  ],
+  "trips": [
+    {
+      "_id": "trp_981815b0-cfc9-42c4-9475-bab1d43726c4",
+      "userId": "usr_43cef6eb",
+      "vehicleId": "veh_04d18eb8-ed3b-4725-b16f-4fba0685f4f4",
+      "date": "2026-10-12",
+      "income": 25000,
+      "diesel": 8000,
+      "driverPayment": 3000,
+      "emiShare": 2000,
+      "otherExpenseItems": [
+        {
+          "name": "Toll Tax",
+          "amount": 1200
+        }
+      ],
+      "otherExpenses": 1200,
+      "notes": "Ahmedabad to Surat run",
+      "createdAt": "2026-10-12T13:13:40.897Z",
+      "updatedAt": "2026-10-12T13:13:40.897Z"
+    }
+  ],
   "settings": [
     {
       "_id": "set_usr_43cef6eb",

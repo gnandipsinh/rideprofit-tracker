@@ -59,7 +59,11 @@ export function getApiBaseUrl(): string {
   const envUrl =
     import.meta.env["VITE_API_URL"] ||
     (typeof process !== "undefined" && process?.env ? process.env["VITE_API_URL"] : "");
-  return (envUrl || "").trim().replace(/\/+$/, "");
+  if (envUrl) return envUrl.trim().replace(/\/+$/, "");
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return window.location.origin;
+  }
+  return "";
 }
 
 export function setApiBaseUrl(url: string): void {
@@ -186,25 +190,10 @@ function generateEntityId(prefix: string): string {
 }
 
 export function getUserVehicles(userId: string): Vehicle[] {
-  if (typeof window === "undefined") return [];
+  if (typeof window === "undefined" || !userId) return [];
   try {
     const raw = window.localStorage.getItem(VEHICLES_PREFIX + userId);
     if (raw) return JSON.parse(raw) as Vehicle[];
-
-    // If empty for this user ID, check if there is existing vehicle data on this device to adopt
-    for (let i = 0; i < window.localStorage.length; i++) {
-      const key = window.localStorage.key(i);
-      if (key && key.startsWith(VEHICLES_PREFIX) && key !== VEHICLES_PREFIX + userId) {
-        const otherRaw = window.localStorage.getItem(key);
-        if (otherRaw) {
-          const parsed = JSON.parse(otherRaw) as Vehicle[];
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            setUserVehicles(userId, parsed);
-            return parsed;
-          }
-        }
-      }
-    }
     return [];
   } catch {
     return [];
@@ -212,7 +201,7 @@ export function getUserVehicles(userId: string): Vehicle[] {
 }
 
 export function setUserVehicles(userId: string, list: Vehicle[]): void {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || !userId) return;
   try {
     window.localStorage.setItem(VEHICLES_PREFIX + userId, JSON.stringify(list));
   } catch {
@@ -221,25 +210,10 @@ export function setUserVehicles(userId: string, list: Vehicle[]): void {
 }
 
 export function getUserTrips(userId: string): Trip[] {
-  if (typeof window === "undefined") return [];
+  if (typeof window === "undefined" || !userId) return [];
   try {
     const raw = window.localStorage.getItem(TRIPS_PREFIX + userId);
     if (raw) return JSON.parse(raw) as Trip[];
-
-    // If empty for this user ID, check if there is existing trip data on this device to adopt
-    for (let i = 0; i < window.localStorage.length; i++) {
-      const key = window.localStorage.key(i);
-      if (key && key.startsWith(TRIPS_PREFIX) && key !== TRIPS_PREFIX + userId) {
-        const otherRaw = window.localStorage.getItem(key);
-        if (otherRaw) {
-          const parsed = JSON.parse(otherRaw) as Trip[];
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            setUserTrips(userId, parsed);
-            return parsed;
-          }
-        }
-      }
-    }
     return [];
   } catch {
     return [];
@@ -247,7 +221,7 @@ export function getUserTrips(userId: string): Trip[] {
 }
 
 export function setUserTrips(userId: string, list: Trip[]): void {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || !userId) return;
   try {
     window.localStorage.setItem(TRIPS_PREFIX + userId, JSON.stringify(list));
   } catch {
@@ -309,9 +283,35 @@ export function setUserSettings(userId: string, settings: AppSettings): void {
   }
 }
 
+export async function syncLocalUserDataToServer(userId: string): Promise<boolean> {
+  if (!userId) return false;
+  const localVehicles = getUserVehicles(userId);
+  const localTrips = getUserTrips(userId);
+  const localSettings = getUserSettings(userId);
+
+  if (localVehicles.length === 0 && localTrips.length === 0) {
+    return false;
+  }
+
+  try {
+    await requestBackend("/api/sync", {
+      method: "POST",
+      body: JSON.stringify({
+        vehicles: localVehicles,
+        trips: localTrips,
+        settings: localSettings,
+      }),
+    });
+    return true;
+  } catch (e) {
+    console.warn("[api] auto sync local records to server failed:", e);
+    return false;
+  }
+}
+
 async function requestBackend<T>(path: string, options: RequestInit = {}): Promise<T> {
   const baseUrl = getApiBaseUrl();
-  if (!baseUrl) throw new Error("No backend API configured");
+  const url = baseUrl ? `${baseUrl.replace(/\/+$/, "")}${path}` : path;
 
   let token = "";
   try {
@@ -325,7 +325,7 @@ async function requestBackend<T>(path: string, options: RequestInit = {}): Promi
     /* ignore */
   }
 
-  const res = await fetch(`${baseUrl}${path}`, {
+  const res = await fetch(url, {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -336,7 +336,10 @@ async function requestBackend<T>(path: string, options: RequestInit = {}): Promi
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ message: res.statusText }));
-    throw new ApiError(err.message || `Request failed with status ${res.status}`, res.status);
+    throw new ApiError(
+      err?.message || err?.error?.message || `Request failed with status ${res.status}`,
+      res.status,
+    );
   }
 
   const json = await res.json();
@@ -348,20 +351,19 @@ async function requestBackend<T>(path: string, options: RequestInit = {}): Promi
 export const api = {
   health: async (): Promise<{ status: string; database: string; url?: string }> => {
     const baseUrl = getApiBaseUrl();
-    if (baseUrl) {
-      try {
-        const res = await fetch(`${baseUrl}/api/health`, { signal: AbortSignal.timeout(4000) });
-        if (res.ok) {
-          const json = await res.json();
-          return {
-            status: "connected",
-            database: json?.data?.database || "connected",
-            url: baseUrl,
-          };
-        }
-      } catch {
-        /* fall through to local status */
+    const endpoint = baseUrl ? `${baseUrl.replace(/\/+$/, "")}/api/health` : "/api/health";
+    try {
+      const res = await fetch(endpoint, { signal: AbortSignal.timeout(4000) });
+      if (res.ok) {
+        const json = await res.json();
+        return {
+          status: "connected",
+          database: json?.data?.database || "persistent-database",
+          url: baseUrl || (typeof window !== "undefined" ? window.location?.origin : ""),
+        };
       }
+    } catch {
+      /* fall through to local status */
     }
     return { status: "local", database: "browser-storage" };
   },
@@ -370,17 +372,43 @@ export const api = {
     const user = await getAuthenticatedUser();
     if (!user) return [];
 
-    const baseUrl = getApiBaseUrl();
-    if (baseUrl) {
-      try {
-        const data = await requestBackend<Vehicle[]>("/api/vehicles");
-        if (Array.isArray(data)) {
-          setUserVehicles(user.id, data);
-          return data;
+    try {
+      const data = await requestBackend<Vehicle[]>("/api/vehicles");
+      if (Array.isArray(data)) {
+        const local = getUserVehicles(user.id);
+        if (data.length === 0 && local.length > 0) {
+          // Upload local legacy vehicles to backend
+          await syncLocalUserDataToServer(user.id);
+          const refetched = await requestBackend<Vehicle[]>("/api/vehicles");
+          if (Array.isArray(refetched) && refetched.length > 0) {
+            setUserVehicles(user.id, refetched);
+            return refetched;
+          }
+        } else if (local.length > 0) {
+          // Check for any unsynced offline records
+          const unsynced = local.filter(
+            (lv) =>
+              !data.some(
+                (sv) =>
+                  sv._id === lv._id ||
+                  (sv.vehicleNumber && lv.vehicleNumber && sv.vehicleNumber === lv.vehicleNumber),
+              ),
+          );
+          if (unsynced.length > 0) {
+            await syncLocalUserDataToServer(user.id);
+            const refetched = await requestBackend<Vehicle[]>("/api/vehicles");
+            if (Array.isArray(refetched)) {
+              setUserVehicles(user.id, refetched);
+              return refetched;
+            }
+          }
         }
-      } catch (e) {
-        console.warn("[api] listVehicles fallback to local cache:", e);
+
+        setUserVehicles(user.id, data);
+        return data;
       }
+    } catch (e) {
+      console.warn("[api] listVehicles fallback to local cache:", e);
     }
 
     return getUserVehicles(user.id);
@@ -520,31 +548,61 @@ export const api = {
     }
   },
 
-  listTrips: async (params: {
-    vehicleId?: string;
-    fromDate?: string;
-    toDate?: string;
-  }): Promise<Trip[]> => {
+  listTrips: async (
+    params: {
+      vehicleId?: string;
+      fromDate?: string;
+      toDate?: string;
+    } = {},
+  ): Promise<Trip[]> => {
     const user = await getAuthenticatedUser();
     if (!user) return [];
 
-    const baseUrl = getApiBaseUrl();
-    if (baseUrl) {
-      try {
-        const query = new URLSearchParams();
-        if (params.vehicleId && params.vehicleId !== ALL_VEHICLES) {
-          query.set("vehicleId", params.vehicleId);
-        }
-        if (params.fromDate) query.set("fromDate", params.fromDate);
-        if (params.toDate) query.set("toDate", params.toDate);
-
-        const data = await requestBackend<Trip[]>(`/api/trips?${query.toString()}`);
-        if (Array.isArray(data)) {
-          return data;
-        }
-      } catch (e) {
-        console.warn("[api] listTrips fallback to local cache:", e);
+    try {
+      const query = new URLSearchParams();
+      if (params.vehicleId && params.vehicleId !== ALL_VEHICLES) {
+        query.set("vehicleId", params.vehicleId);
       }
+      if (params.fromDate) query.set("fromDate", params.fromDate);
+      if (params.toDate) query.set("toDate", params.toDate);
+
+      const qs = query.toString();
+      const path = qs ? `/api/trips?${qs}` : "/api/trips";
+      const data = await requestBackend<Trip[]>(path);
+      if (Array.isArray(data)) {
+        const isUnfiltered =
+          (!params.vehicleId || params.vehicleId === ALL_VEHICLES) &&
+          !params.fromDate &&
+          !params.toDate;
+
+        if (isUnfiltered) {
+          const local = getUserTrips(user.id);
+          if (data.length === 0 && local.length > 0) {
+            // Upload local legacy trips to backend
+            await syncLocalUserDataToServer(user.id);
+            const refetched = await requestBackend<Trip[]>("/api/trips");
+            if (Array.isArray(refetched) && refetched.length > 0) {
+              setUserTrips(user.id, refetched);
+              return refetched;
+            }
+          } else if (local.length > 0) {
+            // Check for any unsynced local trips
+            const unsynced = local.filter((lt) => !data.some((st) => st._id === lt._id));
+            if (unsynced.length > 0) {
+              await syncLocalUserDataToServer(user.id);
+              const refetched = await requestBackend<Trip[]>("/api/trips");
+              if (Array.isArray(refetched)) {
+                setUserTrips(user.id, refetched);
+                return refetched;
+              }
+            }
+          }
+          setUserTrips(user.id, data);
+        }
+        return data;
+      }
+    } catch (e) {
+      console.warn("[api] listTrips fallback to local cache:", e);
     }
 
     let trips = getUserTrips(user.id);

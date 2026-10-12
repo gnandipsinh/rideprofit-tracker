@@ -39,6 +39,7 @@ import {
   importLocalUserData,
   sanitizeEmail,
   setApiBaseUrl,
+  syncLocalUserDataToServer,
 } from "@/lib/api";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -102,6 +103,7 @@ function SettingsPage() {
   const [backendStatus, setBackendStatus] = useState<string | null>(null);
   const [importJson, setImportJson] = useState("");
   const [showImportArea, setShowImportArea] = useState(false);
+  const [syncingToServer, setSyncingToServer] = useState(false);
 
   useEffect(() => {
     if (!settings || hydrated) return;
@@ -183,6 +185,27 @@ function SettingsPage() {
       setShowImportArea(false);
     } catch {
       toast.error("Invalid backup code. Please check and try again.");
+    }
+  };
+
+  const handleSyncLocalToServer = async () => {
+    if (!userId) {
+      toast.error("User session not loaded");
+      return;
+    }
+    setSyncingToServer(true);
+    try {
+      const ok = await syncLocalUserDataToServer(userId);
+      await queryClient.invalidateQueries();
+      if (ok) {
+        toast.success("All local records uploaded and synced to shared cloud database!");
+      } else {
+        toast.info("Database is already up to date.");
+      }
+    } catch {
+      toast.error("Failed to sync records with database.");
+    } finally {
+      setSyncingToServer(false);
     }
   };
 
@@ -646,6 +669,17 @@ function SettingsPage() {
                   Instant Data Sync Between Devices
                 </h4>
                 <div className="flex flex-wrap gap-2.5">
+                  <Button
+                    type="button"
+                    onClick={handleSyncLocalToServer}
+                    disabled={syncingToServer}
+                    className="h-10 rounded-xl text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
+                  >
+                    <RefreshCw
+                      className={`mr-1.5 h-3.5 w-3.5 ${syncingToServer ? "animate-spin" : ""}`}
+                    />
+                    {syncingToServer ? "Syncing..." : "Sync All to Cloud Database"}
+                  </Button>
                   <Button
                     type="button"
                     variant="outline"
