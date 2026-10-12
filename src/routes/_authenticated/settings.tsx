@@ -55,14 +55,12 @@ function SettingsPage() {
   const queryClient = useQueryClient();
   const save = useSaveSettings();
 
-  const [appName, setAppName] = useState("");
-  const [transportationName, setTransportationName] = useState("");
+  const [transportName, setTransportName] = useState("");
   const [currency, setCurrency] = useState("INR");
   const [defaultVehicleId, setDefaultVehicleId] = useState(NO_DEFAULT);
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [mobileNumber, setMobileNumber] = useState("");
-  const [businessName, setBusinessName] = useState("");
   const [address, setAddress] = useState("");
   const [contactNumber, setContactNumber] = useState("");
   const [businessEmail, setBusinessEmail] = useState("");
@@ -75,13 +73,13 @@ function SettingsPage() {
 
   useEffect(() => {
     if (!settings || hydrated) return;
-    setAppName(settings.appName || "");
-    setTransportationName(settings.transportationName || "");
+    const initialName =
+      settings.transportationName || settings.businessName || settings.appName || "";
+    setTransportName(initialName);
     setCurrency(settings.currency || "INR");
     setDefaultVehicleId(settings.defaultVehicleId || NO_DEFAULT);
     setFullName(settings.fullName || "");
     setMobileNumber(settings.mobileNumber || "");
-    setBusinessName(settings.businessName || "");
     setAddress(settings.address || "");
     setContactNumber(settings.contactNumber || "");
     setBusinessEmail(settings.businessEmail || "");
@@ -97,33 +95,29 @@ function SettingsPage() {
   }, []);
 
   const submit = () => {
-    const transport = transportationName.trim();
-    const app = appName.trim() || transport || "Vehicle Calculation System";
-    if (!transport && !app) {
-      toast.error("Transportation name is required");
+    const name = transportName.trim();
+    if (!name) {
+      toast.error("Transport / Business name is required");
       return;
     }
     const payload = {
-      appName: app,
-      transportationName: transport || app,
+      appName: name,
+      transportationName: name,
+      businessName: name,
       currency,
       defaultVehicleId: defaultVehicleId === NO_DEFAULT ? null : defaultVehicleId,
       fullName: fullName.trim(),
       mobileNumber: mobileNumber.trim(),
-      businessName: businessName.trim(),
       address: address.trim(),
       contactNumber: contactNumber.trim(),
       businessEmail: sanitizeEmail(businessEmail),
     };
-    setAppName(payload.appName);
-    setTransportationName(payload.transportationName);
+    setTransportName(name);
     save.mutate(payload, {
       onSuccess: (saved) => {
-        setAppName(saved.appName || payload.appName);
-        setTransportationName(saved.transportationName || payload.transportationName);
+        setTransportName(saved.transportationName || saved.businessName || saved.appName || name);
         setFullName(saved.fullName || payload.fullName);
         setMobileNumber(saved.mobileNumber || payload.mobileNumber);
-        setBusinessName(saved.businessName || payload.businessName);
         setAddress(saved.address || payload.address);
         setContactNumber(saved.contactNumber || payload.contactNumber);
         setBusinessEmail(saved.businessEmail || payload.businessEmail);
@@ -270,50 +264,21 @@ function SettingsPage() {
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2 sm:col-span-2">
                 <Label
-                  htmlFor="appName"
+                  htmlFor="transportName"
                   className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground"
                 >
-                  App Name
+                  Transport / Business Name
                 </Label>
                 <Input
-                  id="appName"
-                  value={appName}
-                  onChange={(e) => setAppName(e.target.value)}
+                  id="transportName"
+                  value={transportName}
+                  onChange={(e) => setTransportName(e.target.value)}
                   className="h-12 rounded-xl bg-secondary/60 text-base"
-                  placeholder="Vehicle Calculation System"
+                  placeholder="e.g. Jay Mataji Transport"
                 />
                 <p className="text-[0.7rem] text-muted-foreground">
-                  Shown in the header when no transportation name is set.
+                  Unified company name displayed across the app, reports, and bills.
                 </p>
-              </div>
-              <div className="space-y-2 sm:col-span-2">
-                <Label
-                  htmlFor="transportationName"
-                  className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground"
-                >
-                  Transportation / Company Name
-                </Label>
-                <Input
-                  id="transportationName"
-                  value={transportationName}
-                  onChange={(e) => setTransportationName(e.target.value)}
-                  className="h-12 rounded-xl bg-secondary/60 text-base"
-                  placeholder="ABC TRANSPORT"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label
-                  htmlFor="businessName"
-                  className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground"
-                >
-                  Business Name
-                </Label>
-                <Input
-                  id="businessName"
-                  value={businessName}
-                  onChange={(e) => setBusinessName(e.target.value)}
-                  className="h-12 rounded-xl bg-secondary/60 text-base"
-                />
               </div>
               <div className="space-y-2">
                 <Label

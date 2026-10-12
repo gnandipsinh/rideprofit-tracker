@@ -841,15 +841,22 @@ export const api = {
     }
 
     const current = getUserSettings(user.id, user.user_metadata, user.email);
+    const unifiedName =
+      sanitizeString(payload.transportationName || payload.businessName || payload.appName) ||
+      current.transportationName ||
+      current.businessName ||
+      current.appName ||
+      "Vehicle Calculation System";
+
     const updated: AppSettings = {
       ...current,
-      appName: sanitizeString(payload.appName) || "Vehicle Calculation System",
-      transportationName: sanitizeString(payload.transportationName),
+      appName: unifiedName,
+      transportationName: unifiedName,
+      businessName: unifiedName,
       currency: payload.currency || "INR",
       defaultVehicleId: payload.defaultVehicleId,
       fullName: sanitizeString(payload.fullName),
       mobileNumber: sanitizeNumber(payload.mobileNumber),
-      businessName: sanitizeString(payload.businessName),
       address: sanitizeString(payload.address),
       contactNumber: sanitizeNumber(payload.contactNumber),
       businessEmail: sanitizeEmail(payload.businessEmail),

@@ -377,16 +377,26 @@ export async function handleApiFetch(request: Request): Promise<Response> {
     if (method === "PUT") {
       const body = (await request.json().catch(() => ({}))) as Partial<SettingsRecord>;
       const now = new Date().toISOString();
+      const unifiedName = (
+        body.transportationName ||
+        body.businessName ||
+        body.appName ||
+        settings?.transportationName ||
+        settings?.businessName ||
+        settings?.appName ||
+        "Vehicle Calculation System"
+      ).trim();
+
       const updated: SettingsRecord = {
         _id: settings?._id || `set_${userId}`,
         userId,
-        appName: (body.appName || settings?.appName || "Vehicle Calculation System").trim(),
-        transportationName: (body.transportationName ?? settings?.transportationName ?? "").trim(),
+        appName: unifiedName,
+        transportationName: unifiedName,
+        businessName: unifiedName,
         currency: body.currency || settings?.currency || "INR",
         defaultVehicleId: body.defaultVehicleId ?? settings?.defaultVehicleId ?? null,
         fullName: (body.fullName ?? settings?.fullName ?? authUser.fullName).trim(),
         mobileNumber: (body.mobileNumber ?? settings?.mobileNumber ?? authUser.mobile).trim(),
-        businessName: (body.businessName ?? settings?.businessName ?? "").trim(),
         address: (body.address ?? settings?.address ?? "").trim(),
         contactNumber: (body.contactNumber ?? settings?.contactNumber ?? authUser.mobile).trim(),
         businessEmail: (body.businessEmail ?? settings?.businessEmail ?? authUser.email).trim(),
