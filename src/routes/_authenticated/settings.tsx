@@ -1,21 +1,7 @@
 import { useEffect, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import {
-  CheckCircle2,
-  Copy,
-  Download,
-  Eye,
-  EyeOff,
-  Laptop,
-  Loader2,
-  LogOut,
-  RefreshCw,
-  Save,
-  Settings,
-  Smartphone,
-  Upload,
-} from "lucide-react";
+import { Eye, EyeOff, Loader2, LogOut, Save, Settings } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
@@ -30,17 +16,7 @@ import {
 } from "@/components/ui/select";
 import { useApp } from "@/lib/app-context";
 import { useSaveSettings } from "@/lib/queries";
-import {
-  api,
-  exportLocalUserData,
-  getApiBaseUrl,
-  getUserTrips,
-  getUserVehicles,
-  importLocalUserData,
-  sanitizeEmail,
-  setApiBaseUrl,
-  syncLocalUserDataToServer,
-} from "@/lib/api";
+import { api, sanitizeEmail } from "@/lib/api";
 import { supabase } from "@/integrations/supabase/client";
 
 const CURRENCIES = [
@@ -97,14 +73,6 @@ function SettingsPage() {
   const [passwordBusy, setPasswordBusy] = useState(false);
   const [hydrated, setHydrated] = useState(false);
 
-  const [userId, setUserId] = useState("");
-  const [backendUrl, setBackendUrl] = useState(() => getApiBaseUrl());
-  const [backendTesting, setBackendTesting] = useState(false);
-  const [backendStatus, setBackendStatus] = useState<string | null>(null);
-  const [importJson, setImportJson] = useState("");
-  const [showImportArea, setShowImportArea] = useState(false);
-  const [syncingToServer, setSyncingToServer] = useState(false);
-
   useEffect(() => {
     if (!settings || hydrated) return;
     setAppName(settings.appName || "");
@@ -125,113 +93,8 @@ function SettingsPage() {
       .getUser()
       .then((res: { data: { user: { id?: string; email?: string } | null } }) => {
         setEmail(res.data.user?.email ?? "");
-        setUserId(res.data.user?.id ?? "");
       });
-    void api.health().then((h) => {
-      setBackendStatus(h.status === "connected" ? "Connected" : "Local Storage");
-    });
   }, []);
-
-  const localVehiclesCount = userId ? getUserVehicles(userId).length : 0;
-  const localTripsCount = userId ? getUserTrips(userId).length : 0;
-
-  const handleExportData = () => {
-    if (!userId) {
-      toast.error("User session not loaded");
-      return;
-    }
-    const backup = exportLocalUserData(userId);
-    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `jay-mataji-transport-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success("Data backup downloaded! Keep this file safe.");
-  };
-
-  const handleCopyBackup = async () => {
-    if (!userId) {
-      toast.error("User session not loaded");
-      return;
-    }
-    const backup = exportLocalUserData(userId);
-    try {
-      await navigator.clipboard.writeText(JSON.stringify(backup, null, 2));
-      toast.success("Backup code copied! Paste it on your PC to sync.");
-    } catch {
-      toast.error("Could not access clipboard");
-    }
-  };
-
-  const handleImportData = () => {
-    if (!userId) {
-      toast.error("User session not loaded");
-      return;
-    }
-    if (!importJson.trim()) {
-      toast.error("Please paste your backup JSON code");
-      return;
-    }
-    try {
-      const parsed = JSON.parse(importJson) as Record<string, unknown>;
-      const res = importLocalUserData(userId, parsed);
-      void queryClient.invalidateQueries();
-      toast.success(
-        `Synced successfully: ${res.importedVehicles} vehicles, ${res.importedTrips} trips restored!`,
-      );
-      setImportJson("");
-      setShowImportArea(false);
-    } catch {
-      toast.error("Invalid backup code. Please check and try again.");
-    }
-  };
-
-  const handleSyncLocalToServer = async () => {
-    if (!userId) {
-      toast.error("User session not loaded");
-      return;
-    }
-    setSyncingToServer(true);
-    try {
-      const ok = await syncLocalUserDataToServer(userId);
-      await queryClient.invalidateQueries();
-      if (ok) {
-        toast.success("All local records uploaded and synced to shared cloud database!");
-      } else {
-        toast.info("Database is already up to date.");
-      }
-    } catch {
-      toast.error("Failed to sync records with database.");
-    } finally {
-      setSyncingToServer(false);
-    }
-  };
-
-  const handleSaveBackend = async () => {
-    setBackendTesting(true);
-    setApiBaseUrl(backendUrl);
-    try {
-      const health = await api.health();
-      if (health.status === "connected") {
-        setBackendStatus("Connected");
-        toast.success("Connected to production database successfully!");
-      } else {
-        setBackendStatus("Local Storage");
-        toast.info(
-          backendUrl
-            ? "Backend URL saved, but endpoint was unreachable."
-            : "Reverted to Local Storage",
-        );
-      }
-    } catch {
-      setBackendStatus("Local Storage");
-      toast.error("Could not reach backend API");
-    } finally {
-      setBackendTesting(false);
-    }
-  };
 
   const submit = () => {
     const transport = transportationName.trim();
@@ -612,173 +475,6 @@ function SettingsPage() {
                 >
                   <LogOut className="mr-2 h-4 w-4" /> Logout
                 </Button>
-              </div>
-            </div>
-          </section>
-
-          <section className="glass-card rounded-2xl p-4 sm:p-5 lg:col-span-2">
-            <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-              <h3 className="flex items-center gap-2 text-sm font-bold">
-                <span className="grid h-6 w-6 place-items-center rounded-full bg-primary/15 text-primary text-[0.6rem]">
-                  4
-                </span>
-                Cross-Device Data Synchronization & Cloud Backup
-              </h3>
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-3 py-0.5 text-xs font-semibold text-primary">
-                <CheckCircle2 className="h-3.5 w-3.5" />
-                {backendStatus === "Connected"
-                  ? "Connected to Production Database"
-                  : "Active on this device (Local Storage)"}
-              </span>
-            </div>
-
-            <p className="mb-4 text-xs text-muted-foreground leading-relaxed">
-              When using different devices (e.g. Phone vs PC), browser storage stays on the device
-              it was created on. Use the instant sync bridge below to transfer your data between
-              devices or connect to your centralized database.
-            </p>
-
-            <div className="grid gap-3 sm:grid-cols-2 mb-4">
-              <div className="rounded-xl border border-border/80 bg-secondary/30 p-3.5">
-                <div className="flex items-center gap-2 mb-1.5 text-xs font-bold text-foreground">
-                  <Smartphone className="h-4 w-4 text-primary" />
-                  <span>Current Device Records</span>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  <strong className="text-foreground">{localVehiclesCount}</strong> vehicles and{" "}
-                  <strong className="text-foreground">{localTripsCount}</strong> trips are currently
-                  saved on this device.
-                </p>
-              </div>
-
-              <div className="rounded-xl border border-border/80 bg-secondary/30 p-3.5">
-                <div className="flex items-center gap-2 mb-1.5 text-xs font-bold text-foreground">
-                  <Laptop className="h-4 w-4 text-primary" />
-                  <span>Other Devices (PC / Phone)</span>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  To view your data on your PC, copy your backup code on your phone and click{" "}
-                  <strong>Restore / Import Data</strong> below on your PC.
-                </p>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <div className="rounded-xl border border-border/70 bg-secondary/20 p-4">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-3">
-                  Instant Data Sync Between Devices
-                </h4>
-                <div className="flex flex-wrap gap-2.5">
-                  <Button
-                    type="button"
-                    onClick={handleSyncLocalToServer}
-                    disabled={syncingToServer}
-                    className="h-10 rounded-xl text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
-                  >
-                    <RefreshCw
-                      className={`mr-1.5 h-3.5 w-3.5 ${syncingToServer ? "animate-spin" : ""}`}
-                    />
-                    {syncingToServer ? "Syncing..." : "Sync All to Cloud Database"}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleExportData}
-                    className="h-10 rounded-xl text-xs font-semibold"
-                  >
-                    <Download className="mr-1.5 h-3.5 w-3.5 text-primary" />
-                    Download Backup File (.json)
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleCopyBackup}
-                    className="h-10 rounded-xl text-xs font-semibold"
-                  >
-                    <Copy className="mr-1.5 h-3.5 w-3.5 text-primary" />
-                    Copy Backup Code
-                  </Button>
-                  <Button
-                    type="button"
-                    onClick={() => setShowImportArea(!showImportArea)}
-                    className="h-10 rounded-xl text-xs font-semibold"
-                  >
-                    <Upload className="mr-1.5 h-3.5 w-3.5" />
-                    {showImportArea ? "Close Import Box" : "Restore / Import Data on this Device"}
-                  </Button>
-                </div>
-
-                {showImportArea ? (
-                  <div className="mt-3.5 space-y-2.5 rounded-xl border border-primary/30 bg-background/80 p-3.5">
-                    <Label htmlFor="importJson" className="text-xs font-semibold text-foreground">
-                      Paste your backup code or JSON content below:
-                    </Label>
-                    <textarea
-                      id="importJson"
-                      rows={4}
-                      value={importJson}
-                      onChange={(e) => setImportJson(e.target.value)}
-                      placeholder='{"version":1,"vehicles":[...],"trips":[...]}'
-                      className="w-full rounded-xl border border-border bg-secondary/40 p-2.5 font-mono text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                    />
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => {
-                          setImportJson("");
-                          setShowImportArea(false);
-                        }}
-                        className="h-9 text-xs"
-                      >
-                        Cancel
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        onClick={handleImportData}
-                        className="h-9 text-xs font-semibold"
-                      >
-                        <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-                        Restore & Sync Now
-                      </Button>
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="rounded-xl border border-border/70 bg-secondary/20 p-4">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">
-                  Centralized Backend API Connection
-                </h4>
-                <p className="text-xs text-muted-foreground mb-3">
-                  If you have deployed your Express backend (or MongoDB connection on Render /
-                  Railway / Vercel), enter the API URL here to enable automatic real-time cloud
-                  synchronization.
-                </p>
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <Input
-                    value={backendUrl}
-                    onChange={(e) => setBackendUrl(e.target.value)}
-                    placeholder="https://your-api.onrender.com"
-                    className="h-10 rounded-xl bg-background/80 text-xs flex-1"
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleSaveBackend}
-                    disabled={backendTesting}
-                    className="h-10 rounded-xl text-xs font-semibold shrink-0"
-                  >
-                    {backendTesting ? (
-                      <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-                    )}
-                    Save & Test Connection
-                  </Button>
-                </div>
               </div>
             </div>
           </section>
