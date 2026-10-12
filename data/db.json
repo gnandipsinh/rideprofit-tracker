@@ -1,7 +1,32 @@
 {
-  "users": [],
+  "users": [
+    {
+      "id": "usr_43cef6eb",
+      "email": "gohilgnandipsinh77@gmail.com",
+      "password": "Gohil@2087",
+      "fullName": "Gohil Gnandipsinh",
+      "mobile": "7990029329",
+      "createdAt": "2026-10-12T12:34:24.341Z"
+    }
+  ],
   "vehicles": [],
   "trips": [],
-  "settings": [],
+  "settings": [
+    {
+      "_id": "set_usr_43cef6eb",
+      "userId": "usr_43cef6eb",
+      "appName": "Jay Mataji Transport",
+      "transportationName": "Jay Mataji Transport",
+      "currency": "INR",
+      "defaultVehicleId": "veh_4961250e-cbcb-4195-8912-9bd26648d8fc",
+      "fullName": "Gohil Gnandipsinh",
+      "mobileNumber": "7990029329",
+      "businessName": "Jay Mataji Logistics",
+      "address": "",
+      "contactNumber": "7990029329",
+      "businessEmail": "gohilgnandipsinh77@gmail.com",
+      "updatedAt": "2026-10-12T12:49:05.971Z"
+    }
+  ],
   "pendingTokens": []
 }
