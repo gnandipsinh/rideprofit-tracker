@@ -189,7 +189,23 @@ export function getUserVehicles(userId: string): Vehicle[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = window.localStorage.getItem(VEHICLES_PREFIX + userId);
-    return raw ? (JSON.parse(raw) as Vehicle[]) : [];
+    if (raw) return JSON.parse(raw) as Vehicle[];
+
+    // If empty for this user ID, check if there is existing vehicle data on this device to adopt
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i);
+      if (key && key.startsWith(VEHICLES_PREFIX) && key !== VEHICLES_PREFIX + userId) {
+        const otherRaw = window.localStorage.getItem(key);
+        if (otherRaw) {
+          const parsed = JSON.parse(otherRaw) as Vehicle[];
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setUserVehicles(userId, parsed);
+            return parsed;
+          }
+        }
+      }
+    }
+    return [];
   } catch {
     return [];
   }
@@ -208,7 +224,23 @@ export function getUserTrips(userId: string): Trip[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = window.localStorage.getItem(TRIPS_PREFIX + userId);
-    return raw ? (JSON.parse(raw) as Trip[]) : [];
+    if (raw) return JSON.parse(raw) as Trip[];
+
+    // If empty for this user ID, check if there is existing trip data on this device to adopt
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i);
+      if (key && key.startsWith(TRIPS_PREFIX) && key !== TRIPS_PREFIX + userId) {
+        const otherRaw = window.localStorage.getItem(key);
+        if (otherRaw) {
+          const parsed = JSON.parse(otherRaw) as Trip[];
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setUserTrips(userId, parsed);
+            return parsed;
+          }
+        }
+      }
+    }
+    return [];
   } catch {
     return [];
   }

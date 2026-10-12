@@ -57,7 +57,17 @@ export function savePendingTokens(tokens: PendingLoginToken[]): void {
   }
 }
 
-function generateUserId(): string {
+function generateUserId(email?: string): string {
+  if (email) {
+    const norm = email.trim().toLowerCase();
+    let hash = 0;
+    for (let i = 0; i < norm.length; i++) {
+      hash = (hash << 5) - hash + norm.charCodeAt(i);
+      hash |= 0;
+    }
+    const hex = Math.abs(hash).toString(16).padStart(8, "0");
+    return `usr_${hex}`;
+  }
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return "usr_" + crypto.randomUUID();
   }
@@ -144,9 +154,51 @@ function createProductionAuth() {
       options?: { data?: Record<string, unknown> };
     }) {
       const normEmail = email.trim().toLowerCase();
+      const meta = options?.data || {};
+      const fullName =
+        typeof meta["full_name"] === "string" ? (meta["full_name"] as string).trim() : "";
+      const mobile = typeof meta["mobile"] === "string" ? (meta["mobile"] as string).trim() : "";
+
+      // 1. Try server registration
+      try {
+        const res = await fetch("/api/auth/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: normEmail, password, fullName, mobile }),
+        });
+        const json = await res.json().catch(() => null);
+        if (json?.data?.user && json?.data?.session) {
+          const user: RealUser = {
+            ...json.data.user,
+            user_metadata: { full_name: fullName, mobile, ...meta },
+            app_metadata: { provider: "email" },
+          };
+          const session: RealSession = {
+            ...json.data.session,
+            user,
+          };
+          const accounts = loadAccounts().filter((a) => a.email.toLowerCase() !== normEmail);
+          accounts.push(user);
+          saveAccounts(accounts);
+          saveActiveSession(session);
+          notifySubscribers("SIGNED_IN", session);
+          return { data: { user, session }, error: null };
+        }
+        if (json?.error?.message || json?.message) {
+          return {
+            data: { user: null, session: null },
+            error: {
+              message: json.error?.message || json.message || "Could not create account.",
+              status: res.status,
+            },
+          };
+        }
+      } catch {
+        /* fallback to local storage if offline */
+      }
+
       const accounts = loadAccounts();
       const existing = accounts.find((a) => a.email.toLowerCase() === normEmail);
-
       if (existing) {
         return {
           data: { user: null, session: null },
@@ -154,27 +206,17 @@ function createProductionAuth() {
         };
       }
 
-      const meta = options?.data || {};
-      const fullName =
-        typeof meta["full_name"] === "string" ? (meta["full_name"] as string).trim() : "";
-      const mobile = typeof meta["mobile"] === "string" ? (meta["mobile"] as string).trim() : "";
-      const userId = generateUserId();
-
+      const userId = generateUserId(normEmail);
       const newUser: RealUser = {
         id: userId,
         email: normEmail,
         password: password || "",
         fullName,
         mobile,
-        user_metadata: {
-          full_name: fullName,
-          mobile,
-          ...meta,
-        },
+        user_metadata: { full_name: fullName, mobile, ...meta },
         app_metadata: { provider: "email" },
-        created_at: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
       };
-
       accounts.push(newUser);
       saveAccounts(accounts);
 
@@ -194,9 +236,50 @@ function createProductionAuth() {
 
     async signInWithPassword({ email, password }: { email: string; password?: string }) {
       const normEmail = email.trim().toLowerCase();
+
+      // 1. Try server login first
+      try {
+        const res = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: normEmail, password }),
+        });
+        const json = await res.json().catch(() => null);
+        if (res.ok && json?.data?.user && json?.data?.session) {
+          const user: RealUser = {
+            ...json.data.user,
+            user_metadata: { full_name: json.data.user.fullName, mobile: json.data.user.mobile },
+            app_metadata: { provider: "email" },
+          };
+          const session: RealSession = {
+            ...json.data.session,
+            user,
+          };
+          const accounts = loadAccounts().filter((a) => a.email.toLowerCase() !== normEmail);
+          accounts.push(user);
+          saveAccounts(accounts);
+          saveActiveSession(session);
+          notifySubscribers("SIGNED_IN", session);
+          return { data: { user, session }, error: null };
+        }
+        if (!res.ok) {
+          // Server returned explicit authentication error — never create account on login failure!
+          return {
+            data: { user: null, session: null },
+            error: {
+              message: json?.error?.message || json?.message || "Invalid email or password.",
+              status: res.status,
+            },
+          };
+        }
+      } catch {
+        /* only fallback if network request itself threw an exception */
+      }
+
       const accounts = loadAccounts();
       const user = accounts.find((a) => a.email.toLowerCase() === normEmail);
 
+      // NEVER CREATE A NEW USER ON LOGIN!
       if (!user) {
         return {
           data: { user: null, session: null },
