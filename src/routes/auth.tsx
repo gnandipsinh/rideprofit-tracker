@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
-  CheckCircle2,
   Eye,
   EyeOff,
   Loader2,
@@ -17,18 +16,18 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { loadPendingTokens, supabase } from "@/integrations/supabase/client";
+import { supabase } from "@/integrations/supabase/client";
 import {
   GENERIC_CREDENTIALS_ERROR,
   GENERIC_ERROR,
   RESEND_COOLDOWN_SECONDS,
+  codeSchema,
   emailSchema,
   loginSchema,
   registerSchema,
   resetSchema,
-  resendSignupEmail,
   safeAuthMessage,
-  sendLoginLink,
+  sendLoginCode,
   sendRecoveryEmail,
 } from "@/lib/auth";
 import { cn } from "@/lib/utils";
@@ -54,9 +53,8 @@ export const Route = createFileRoute("/auth")({
   component: AuthPage,
 });
 
-type Step = "login" | "register" | "email-login" | "email-link" | "forgot" | "reset";
-type EmailLinkPurpose = "login" | "register" | "reset";
-type ForgotState = "form" | "confirmation";
+type Step = "login" | "register" | "email-login" | "code" | "forgot" | "reset";
+type CodePurpose = "login" | "reset";
 type Errors = Record<string, string>;
 
 function PasswordField({
@@ -164,9 +162,10 @@ export default function AuthPage() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
 
-  const [emailLinkPurpose, setEmailLinkPurpose] = useState<EmailLinkPurpose>("login");
+  const [codePurpose, setCodePurpose] = useState<CodePurpose>("login");
+  const [code, setCode] = useState("");
+  const [codeNotice, setCodeNotice] = useState("");
   const [cooldown, setCooldown] = useState(0);
-  const [forgotState, setForgotState] = useState<ForgotState>("form");
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -175,52 +174,10 @@ export default function AuthPage() {
   }, [cooldown]);
 
   useEffect(() => {
-    // 1. Check for token verification link in URL
-    if (typeof window !== "undefined") {
-      const urlParams = new URLSearchParams(window.location.search);
-      const token = urlParams.get("token") || urlParams.get("token_hash");
-      const emailParam = urlParams.get("email");
-
-      if (token) {
-        setBusy(true);
-        void (
-          supabase.auth as unknown as {
-            verifyOtp: (opts: {
-              token?: string;
-              email?: string;
-              type?: string;
-            }) => Promise<{ error: { message?: string } | null }>;
-          }
-        )
-          .verifyOtp({ token, email: emailParam || undefined, type: "email" })
-          .then((res) => {
-            window.history.replaceState({}, document.title, window.location.pathname);
-            if (res.error) {
-              setFormError(res.error.message || "Invalid or expired login link.");
-              toast.error(res.error.message || "Invalid or expired login link.");
-              setStep("login");
-            } else {
-              toast.success("Login verified successfully! Welcome back.");
-              navigate({ to: "/", replace: true });
-            }
-          })
-          .catch(() => {
-            window.history.replaceState({}, document.title, window.location.pathname);
-            setFormError("Verification failed. Please request a new link.");
-            toast.error("Verification failed. Please request a new link.");
-            setStep("login");
-          })
-          .finally(() => {
-            setBusy(false);
-          });
-        return;
-      }
-    }
-
-    // 2. Check if user already has an active session
+    // If a session already exists there is nothing to do on this screen.
     supabase.auth.getUser().then((res: { data: { user: unknown } }) => {
       if (res.data?.user) {
-        navigate({ to: "/", replace: true });
+        void Promise.resolve(navigate({ to: "/", replace: true })).catch(() => undefined);
       }
     });
 
@@ -228,7 +185,9 @@ export default function AuthPage() {
       if (event === "PASSWORD_RECOVERY") {
         setStep("reset");
       } else if (event === "SIGNED_IN") {
-        navigate({ to: "/", replace: true });
+        // Single navigation point — runs outside any submit handler so a
+        // router redirect can never surface as a form error.
+        void Promise.resolve(navigate({ to: "/", replace: true })).catch(() => undefined);
       }
     });
     return () => data.subscription.unsubscribe();
@@ -237,7 +196,8 @@ export default function AuthPage() {
   function reset(next: Step) {
     setErrors({});
     setFormError("");
-    setForgotState("form");
+    setCode("");
+    setCodeNotice("");
     setStep(next);
   }
 
@@ -262,6 +222,7 @@ export default function AuthPage() {
     if (requestInFlight.current) return;
     requestInFlight.current = true;
     setBusy(true);
+    let succeeded = false;
     try {
       const { error } = await supabase.auth.signUp({
         email: parsed.data.email,
@@ -271,14 +232,18 @@ export default function AuthPage() {
         },
       });
       if (error) {
-        setFormError(safeAuthMessage(error.message));
+        // Show the actual server error message directly (duplicate email, etc.)
+        setFormError(error.message || GENERIC_ERROR);
         return;
       }
+      succeeded = true;
       setPassword("");
       setConfirmPassword("");
       toast.success("Account created successfully! Welcome to Jay Mataji Transport.");
-      navigate({ to: "/", replace: true });
+      // Navigation happens in the SIGNED_IN subscriber (outside this try/catch),
+      // so a router redirect can never be misreported as an error here.
     } catch {
+      if (succeeded) return; // redirect raised after a successful registration
       setFormError(GENERIC_ERROR);
     } finally {
       requestInFlight.current = false;
@@ -286,34 +251,70 @@ export default function AuthPage() {
     }
   }
 
-  async function handleLoginLink(e: React.FormEvent) {
-    e.preventDefault();
-    setErrors({});
-    setFormError("");
+  /**
+   * Shared sender for both the email-login code and the password-reset code.
+   * The server's response never tells us whether the account exists.
+   * Returns true when the code step should be shown.
+   */
+  async function sendCode(purpose: CodePurpose, opts: { resend?: boolean } = {}): Promise<boolean> {
     const parsed = emailSchema.safeParse(email);
     if (!parsed.success) {
       setErrors({ email: parsed.error.issues[0]?.message ?? "Enter a valid email" });
-      return;
+      return false;
     }
-    if (requestInFlight.current) return;
+    if (requestInFlight.current) return false;
     requestInFlight.current = true;
     setBusy(true);
     try {
-      const { error } = await sendLoginLink(parsed.data);
-      if (error) {
-        setFormError(safeAuthMessage(error.message));
-        return;
+      const res =
+        purpose === "login"
+          ? await sendLoginCode(parsed.data)
+          : await sendRecoveryEmail(parsed.data);
+      if (res.error) {
+        setFormError(safeAuthMessage(res.error.message));
+        return false;
       }
-      setEmailLinkPurpose("login");
+
+      const info = res.data;
+      if (info?.devMode) {
+        setCodeNotice(
+          "Development mode: no email provider is configured, so the code was printed to the server console.",
+        );
+      } else if (info && !info.delivered) {
+        setFormError(
+          "Email delivery isn't configured on this server. Ask the administrator to set RESEND_API_KEY, or sign in with your password instead.",
+        );
+        return false;
+      } else {
+        setCodeNotice("");
+      }
+
+      setErrors({});
+      setFormError("");
+      if (!opts.resend) {
+        setCode("");
+        setStep("code");
+        toast.success("Verification code sent");
+      } else {
+        toast.success("A new code is on its way");
+      }
+      setCodePurpose(purpose);
       setCooldown(RESEND_COOLDOWN_SECONDS);
-      reset("email-link");
-      toast.success("Login link sent");
+      return true;
     } catch {
       setFormError(GENERIC_ERROR);
+      return false;
     } finally {
       requestInFlight.current = false;
       setBusy(false);
     }
+  }
+
+  async function handleSendLoginCode(e: React.FormEvent) {
+    e.preventDefault();
+    setErrors({});
+    setFormError("");
+    await sendCode("login");
   }
 
   async function handleLogin(e: React.FormEvent) {
@@ -328,19 +329,24 @@ export default function AuthPage() {
     if (requestInFlight.current) return;
     requestInFlight.current = true;
     setBusy(true);
+    let succeeded = false;
     try {
       const { error } = await supabase.auth.signInWithPassword({
         email: parsed.data.email,
         password: parsed.data.password,
       });
       if (error) {
-        setFormError(GENERIC_CREDENTIALS_ERROR);
+        // Surface throttling clearly; everything else stays generic.
+        setFormError(
+          error.status === 429 ? safeAuthMessage(error.message) : GENERIC_CREDENTIALS_ERROR,
+        );
         return;
       }
-      await supabase.auth.getUser();
+      succeeded = true;
       toast.success("Signed in successfully");
-      navigate({ to: "/", replace: true });
+      // Navigation happens in the SIGNED_IN subscriber (outside this try/catch).
     } catch {
+      if (succeeded) return; // redirect raised after a successful sign-in
       setFormError(GENERIC_ERROR);
     } finally {
       requestInFlight.current = false;
@@ -352,45 +358,59 @@ export default function AuthPage() {
     e.preventDefault();
     setErrors({});
     setFormError("");
-    const parsed = emailSchema.safeParse(email);
+    await sendCode("reset");
+  }
+
+  async function handleResendCode() {
+    if (cooldown > 0 || requestInFlight.current) return;
+    setErrors({});
+    setFormError("");
+    await sendCode(codePurpose, { resend: true });
+  }
+
+  async function handleVerifyCode(e: React.FormEvent) {
+    e.preventDefault();
+    setErrors({});
+    setFormError("");
+    const parsed = codeSchema.safeParse(code);
     if (!parsed.success) {
-      setErrors({ email: parsed.error.issues[0]?.message ?? "Enter a valid email" });
+      setErrors({ code: parsed.error.issues[0]?.message ?? "Enter the 6-digit code" });
       return;
     }
     if (requestInFlight.current) return;
     requestInFlight.current = true;
     setBusy(true);
+    let succeeded = false;
     try {
-      const { error } = await sendRecoveryEmail(parsed.data);
-      if (error) {
-        setFormError(safeAuthMessage(error.message));
+      if (codePurpose === "login") {
+        const { error } = await supabase.auth.verifyEmailCode({
+          email,
+          code: parsed.data,
+        });
+        if (error) {
+          setFormError(error.message || GENERIC_ERROR);
+          return;
+        }
+        succeeded = true;
+        toast.success("Signed in successfully");
+        // Navigation happens in the SIGNED_IN subscriber (outside this try/catch).
       } else {
-        toast.success("Verification confirmed! You can now set a new password.");
+        const { error } = await supabase.auth.verifyResetCode({
+          email,
+          code: parsed.data,
+        });
+        if (error) {
+          setFormError(error.message || GENERIC_ERROR);
+          return;
+        }
+        succeeded = true;
+        setCode("");
         setStep("reset");
+        toast.success("Code verified — now choose a new password");
       }
-    } finally {
-      requestInFlight.current = false;
-      setBusy(false);
-    }
-  }
-
-  async function handleResend() {
-    if (cooldown > 0 || requestInFlight.current) return;
-    requestInFlight.current = true;
-    setBusy(true);
-    try {
-      const res =
-        emailLinkPurpose === "reset"
-          ? await sendRecoveryEmail(email)
-          : emailLinkPurpose === "register"
-            ? await resendSignupEmail(email)
-            : await sendLoginLink(email);
-      if (res.error) {
-        setFormError(safeAuthMessage(res.error.message));
-        return;
-      }
-      setCooldown(RESEND_COOLDOWN_SECONDS);
-      toast.success("A new login link is on its way");
+    } catch {
+      if (succeeded) return;
+      setFormError(GENERIC_ERROR);
     } finally {
       requestInFlight.current = false;
       setBusy(false);
@@ -409,17 +429,21 @@ export default function AuthPage() {
     if (requestInFlight.current) return;
     requestInFlight.current = true;
     setBusy(true);
+    let succeeded = false;
     try {
       const { error } = await supabase.auth.updateUser({ password: parsed.data.password });
       if (error) {
-        setFormError(safeAuthMessage(error.message));
+        setFormError(error.message || safeAuthMessage(error.message));
         return;
       }
+      succeeded = true;
       toast.success("Password updated");
       setPassword("");
       setConfirmPassword("");
-      navigate({ to: "/", replace: true });
+      // Full page reload: drops the old session and starts clean on "/".
+      window.location.href = "/";
     } catch {
+      if (succeeded) return;
       setFormError(GENERIC_ERROR);
     } finally {
       requestInFlight.current = false;
@@ -431,19 +455,19 @@ export default function AuthPage() {
     login: { title: "Welcome back", sub: "Sign in securely with your password." },
     register: {
       title: "Create your account",
-      sub: "We'll email a confirmation link to activate your account.",
+      sub: "Fill in your details to register instantly. No email confirmation required.",
     },
     "email-login": {
-      title: "Login with email",
-      sub: "We'll send a secure login link to your registered email.",
+      title: "Login with email code",
+      sub: "We'll email a 6-digit code to your registered email address.",
     },
-    "email-link": {
-      title: "Check your registered email",
-      sub: "We've sent a login link to your registered email. Please check your inbox and click the link to continue.",
+    code: {
+      title: "Enter verification code",
+      sub: "We emailed you a 6-digit code. It expires in 15 minutes.",
     },
     forgot: {
       title: "Forgot password",
-      sub: "We'll email you a secure link to reset your password.",
+      sub: "We'll email you a 6-digit code to verify it's you.",
     },
     reset: {
       title: "Set a new password",
@@ -526,7 +550,7 @@ export default function AuthPage() {
                 onClick={() => reset("email-login")}
                 className="h-12 w-full rounded-xl text-sm font-bold"
               >
-                <Mail className="mr-2 h-4 w-4" /> Login with email link
+                <Mail className="mr-2 h-4 w-4" /> Login with email code
               </Button>
               <p className="text-center text-xs text-muted-foreground">
                 New here?{" "}
@@ -542,7 +566,7 @@ export default function AuthPage() {
           ) : null}
 
           {step === "email-login" ? (
-            <form onSubmit={handleLoginLink} className="space-y-4">
+            <form onSubmit={handleSendLoginCode} className="space-y-4">
               <Field
                 id="email-login-email"
                 label="Registered email"
@@ -565,7 +589,7 @@ export default function AuthPage() {
                 ) : (
                   <Mail className="mr-2 h-4 w-4" />
                 )}
-                Send Login Email
+                Send login code
               </Button>
               <Button
                 type="button"
@@ -655,160 +679,102 @@ export default function AuthPage() {
           ) : null}
 
           {step === "forgot" ? (
-            forgotState === "form" ? (
-              <form onSubmit={handleForgot} className="space-y-4">
-                <Field
-                  id="forgot-email"
-                  label="Registered email"
-                  icon={Mail}
-                  type="email"
-                  inputMode="email"
-                  autoComplete="email"
-                  placeholder="Enter your email"
-                  value={email}
-                  error={errors["email"]}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-                <Button
-                  type="submit"
-                  disabled={busy}
-                  className="h-12 w-full rounded-xl text-sm font-bold"
+            <form onSubmit={handleForgot} className="space-y-4">
+              <Field
+                id="forgot-email"
+                label="Registered email"
+                icon={Mail}
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                placeholder="Enter your email"
+                value={email}
+                error={errors["email"]}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+              <Button
+                type="submit"
+                disabled={busy}
+                className="h-12 w-full rounded-xl text-sm font-bold"
+              >
+                {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                Send reset code
+              </Button>
+              <p className="text-center text-xs text-muted-foreground">
+                <button
+                  type="button"
+                  onClick={() => reset("login")}
+                  className="font-semibold text-primary hover:underline"
                 >
-                  {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                  Send reset link
-                </Button>
-                <p className="text-center text-xs text-muted-foreground">
-                  <button
-                    type="button"
-                    onClick={() => reset("login")}
-                    className="font-semibold text-primary hover:underline"
-                  >
-                    Back to sign in
-                  </button>
-                </p>
-              </form>
-            ) : (
-              <div className="space-y-4 text-center">
+                  Back to sign in
+                </button>
+              </p>
+            </form>
+          ) : null}
+
+          {step === "code" ? (
+            <form onSubmit={handleVerifyCode} className="space-y-4">
+              <div className="space-y-1 text-center">
                 <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-primary/15 text-primary">
                   <MailOpen className="h-8 w-8" />
                 </div>
-                <div className="space-y-1">
-                  <h2 className="text-lg font-semibold">Check your email</h2>
-                  <p className="text-sm text-muted-foreground">
-                    We've sent a password reset link to your registered email. Please check your
-                    inbox and click the link to continue.
-                  </p>
-                  {email && <p className="mt-1 text-xs text-muted-foreground/70">{email}</p>}
-                </div>
-                <Button
-                  type="button"
-                  disabled={cooldown > 0 || busy}
-                  onClick={handleResend}
-                  className="h-12 w-full rounded-xl text-sm font-bold"
-                >
-                  {cooldown > 0 ? `Resend reset link in ${cooldown}s` : "Resend Reset Email"}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={busy}
-                  onClick={() => {
-                    setForgotState("form");
-                    reset("login");
-                  }}
-                  className="h-12 w-full rounded-xl text-sm font-bold"
-                >
-                  Back to Login
-                </Button>
-              </div>
-            )
-          ) : null}
-
-          {step === "email-link" ? (
-            <div className="space-y-4 text-center">
-              <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-primary/15 text-primary">
-                <MailOpen className="h-8 w-8" />
-              </div>
-              <div className="space-y-1">
-                <h2 className="text-lg font-semibold">Check your registered email</h2>
-                <p className="text-sm text-muted-foreground">
-                  We've sent a login link to your email. Open your inbox and click the link to
-                  securely sign in.
-                </p>
-                {email && (
-                  <p className="mt-1 font-medium text-xs text-foreground/80 bg-secondary/50 py-1 px-3 rounded-lg inline-block">
+                <p className="text-sm text-muted-foreground">Enter the 6-digit code we sent to</p>
+                {email ? (
+                  <p className="inline-block rounded-lg bg-secondary/50 px-3 py-1 text-xs font-medium text-foreground/80">
                     {email}
                   </p>
-                )}
-                <div className="mt-3 space-y-2 text-left text-xs text-muted-foreground">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="h-4 w-4 text-primary" />
-                    <span>Open your email inbox and click the secure link</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="h-4 w-4 text-primary" />
-                    <span>Single-use token verifies your identity before login</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="h-4 w-4 text-primary" />
-                    <span>The login link expires automatically in 15 minutes</span>
-                  </div>
-                </div>
+                ) : null}
               </div>
+
+              {codeNotice ? (
+                <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-600 dark:text-amber-400">
+                  {codeNotice}
+                </div>
+              ) : null}
+
+              <Field
+                id="verify-code"
+                label="Verification code"
+                icon={ShieldCheck}
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                placeholder="123456"
+                value={code}
+                error={errors["code"]}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              />
               <Button
-                type="button"
-                disabled={cooldown > 0 || busy}
-                onClick={handleResend}
-                className="h-12 w-full rounded-xl whitespace-normal px-3 text-center text-sm font-bold leading-snug"
+                type="submit"
+                disabled={busy}
+                className="h-12 w-full rounded-xl text-sm font-bold"
               >
                 {busy ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
-                  <CheckCircle2 className="mr-2 h-4 w-4" />
+                  <ShieldCheck className="mr-2 h-4 w-4" />
                 )}
-                {cooldown > 0 ? `Resend Login Email in ${cooldown}s` : "Resend Login Email"}
+                Verify code
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={cooldown > 0 || busy}
+                onClick={handleResendCode}
+                className="h-12 w-full rounded-xl text-sm font-bold"
+              >
+                {cooldown > 0 ? `Resend code in ${cooldown}s` : "Resend code"}
               </Button>
               <Button
                 type="button"
                 variant="outline"
                 disabled={busy}
-                onClick={() => reset("login")}
+                onClick={() => reset(codePurpose === "reset" ? "forgot" : "email-login")}
                 className="h-12 w-full rounded-xl text-sm font-bold"
               >
-                Back to Login
+                Back
               </Button>
-
-              {(() => {
-                const pending = loadPendingTokens();
-                const latest = pending
-                  .filter(
-                    (t) =>
-                      t.email.toLowerCase() === email.toLowerCase() &&
-                      !t.used &&
-                      Date.now() < t.expiresAt,
-                  )
-                  .sort((a, b) => b.createdAt - a.createdAt)[0];
-                if (!latest) return null;
-                return (
-                  <div className="pt-2 border-t border-border/40 text-left">
-                    <p className="text-[0.7rem] text-muted-foreground mb-1.5 font-medium">
-                      Simulate Inbox Action (Testing / Verification):
-                    </p>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => {
-                        window.location.href = `/auth?token=${latest.token}&email=${encodeURIComponent(email)}&type=email`;
-                      }}
-                      className="h-9 w-full rounded-xl text-xs font-semibold"
-                    >
-                      Open Email Login Link (Verify Token)
-                    </Button>
-                  </div>
-                );
-              })()}
-            </div>
+            </form>
           ) : null}
 
           {step === "reset" ? (

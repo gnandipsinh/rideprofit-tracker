@@ -87,6 +87,15 @@ async function requestBackend<T>(path: string, options: RequestInit = {}): Promi
   });
 
   if (!res.ok) {
+    if (res.status === 401) {
+      // The token is expired, malformed or was revoked — drop the local session
+      // so the auth guard can send the user back to the sign-in screen.
+      try {
+        await supabase.auth.signOut();
+      } catch {
+        /* ignore */
+      }
+    }
     const err = await res.json().catch(() => ({ message: res.statusText }));
     throw new ApiError(
       err?.message || err?.error?.message || `Request failed with status ${res.status}`,

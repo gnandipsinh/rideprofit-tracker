@@ -19,6 +19,9 @@ dist-ssr
 .env.local
 .env.*.local
 
+# Application data — user records, hashes and the signing secret (never commit)
+data/
+
 # Build & cache
 .aistudio
 *.pdf

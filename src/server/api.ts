@@ -1,25 +1,295 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import crypto from "node:crypto";
 import {
-  generateStableUserId,
+  getOrCreateSecret,
   loadDatabase,
-  saveDatabase,
+  withDatabase,
   type OtherExpenseItem,
+  type PendingTokenRecord,
   type SettingsRecord,
   type TripRecord,
   type UserRecord,
   type VehicleRecord,
 } from "./db";
+import { ensureStoreReady, getStore } from "./store";
 
-function jsonResponse(data: unknown, status = 200): Response {
+/**
+ * Returns the store after guaranteeing the schema exists. Every direct store
+ * call (rate limiting, sessions) must go through this, because those paths run
+ * before any loadDatabase()/withDatabase() call would have lazily applied DDL.
+ */
+async function readyStore() {
+  await ensureStoreReady();
+  return getStore();
+}
+
+/** sha256 of an access token — the key used in the server-side session ledger. */
+function sessionKey(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+// ---------------------------------------------------------------------------
+// Input validation
+// ---------------------------------------------------------------------------
+
+const EMAIL_MAX = 255;
+const PASSWORD_MIN = 8;
+const PASSWORD_MAX = 72;
+const NAME_MAX = 80;
+const TEXT_MAX = 255;
+const NOTES_MAX = 2000;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function normalizeEmail(raw: unknown): string {
+  return typeof raw === "string" ? raw.trim().toLowerCase().slice(0, EMAIL_MAX) : "";
+}
+
+function isValidEmail(email: string): boolean {
+  return email.length > 0 && email.length <= EMAIL_MAX && EMAIL_RE.test(email);
+}
+
+/** Returns an error message, or null when the password is acceptable. */
+function validatePassword(pw: unknown): string | null {
+  if (typeof pw !== "string" || pw.length === 0) return "Password is required.";
+  if (pw.length < PASSWORD_MIN) return `Password must be at least ${PASSWORD_MIN} characters.`;
+  if (pw.length > PASSWORD_MAX) return `Password must be under ${PASSWORD_MAX} characters.`;
+  if (!/[A-Za-z]/.test(pw)) return "Include at least one letter.";
+  if (!/[0-9]/.test(pw)) return "Include at least one number.";
+  return null;
+}
+
+function cleanString(value: unknown, max = TEXT_MAX): string {
+  return typeof value === "string" ? value.trim().slice(0, max) : "";
+}
+
+function toAmount(value: unknown): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.min(n, 1_000_000_000);
+}
+
+// ---------------------------------------------------------------------------
+// Password hashing with Node built-in scrypt (no external dependency)
+// Stored format: "scrypt:<hex-salt>:<hex-hash>"
+// Legacy plaintext passwords are accepted once and auto-upgraded on login.
+// ---------------------------------------------------------------------------
+
+const SCRYPT_KEYLEN = 64;
+const SCRYPT_PARAMS = { N: 16384, r: 8, p: 1 };
+
+function isHashedPassword(pw: string): boolean {
+  return pw.startsWith("scrypt:");
+}
+
+async function hashPassword(plaintext: string): Promise<string> {
+  const salt = crypto.randomBytes(16).toString("hex");
+  return new Promise((resolve, reject) => {
+    crypto.scrypt(plaintext, salt, SCRYPT_KEYLEN, SCRYPT_PARAMS, (err, key) => {
+      if (err) reject(err);
+      else resolve(`scrypt:${salt}:${key.toString("hex")}`);
+    });
+  });
+}
+
+async function verifyPassword(plaintext: string, stored: string): Promise<boolean> {
+  if (!stored) return false;
+
+  if (isHashedPassword(stored)) {
+    const parts = stored.split(":");
+    if (parts.length !== 3) return false;
+    const salt = parts[1];
+    const expected = parts[2];
+    if (!salt || !expected) return false;
+    return new Promise((resolve) => {
+      crypto.scrypt(plaintext, salt, SCRYPT_KEYLEN, SCRYPT_PARAMS, (err, key) => {
+        if (err) {
+          resolve(false);
+        } else {
+          const computed = key.toString("hex");
+          resolve(
+            computed.length === expected.length &&
+              crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(expected)),
+          );
+        }
+      });
+    });
+  }
+
+  // Backward compatibility: plaintext password (legacy account) — compared in
+  // constant time and upgraded by the caller right after a successful login.
+  const storedBuf = Buffer.from(stored, "utf8");
+  const givenBuf = Buffer.from(plaintext, "utf8");
+  if (storedBuf.length !== givenBuf.length) return false;
+  return crypto.timingSafeEqual(storedBuf, givenBuf);
+}
+
+// ---------------------------------------------------------------------------
+// HMAC-signed tokens — format: v1_<userId>_<purpose>_<expiresAt>_<hmac>
+// The signing secret comes from TOKEN_SECRET, or is generated once and kept in
+// data/.token-secret (owner-only, never committed). There is no hardcoded
+// fallback secret: a leaked source tree can never forge tokens.
+// ---------------------------------------------------------------------------
+
+const ACCESS_TOKEN_TTL_SECONDS = 3600 * 24 * 30; // 30 days
+const RESET_TOKEN_TTL_SECONDS = 600; // 10 minutes
+type TokenPurpose = "access" | "reset";
+/** Purpose of an emailed verification code. */
+type CodePurpose = "login" | "reset";
+
+let cachedSecret: string | null = null;
+
+const TOKEN_SECRET_MIN = 32;
+
+function getTokenSecret(): string {
+  if (cachedSecret) return cachedSecret;
+
+  const envSecret = process.env["TOKEN_SECRET"] || process.env["VITE_TOKEN_SECRET"];
+
+  if (isProductionServer()) {
+    // Production must never fall back to a generated per-instance secret: on a
+    // serverless platform each instance would mint its own key, so a token
+    // signed by one instance would be rejected by another (and rotating the
+    // secret would be impossible). Require a strong, explicit value instead.
+    if (!envSecret || envSecret.length < TOKEN_SECRET_MIN) {
+      throw new Error(
+        `[config] TOKEN_SECRET must be set to at least ${TOKEN_SECRET_MIN} characters in production. ` +
+          "Generate one with: node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\" " +
+          "Set it in your deployment environment (never commit it).",
+      );
+    }
+    cachedSecret = envSecret;
+    return cachedSecret;
+  }
+
+  // Development: prefer the env value, else generate once and persist locally.
+  if (envSecret && envSecret.length >= 16) {
+    cachedSecret = envSecret;
+    return cachedSecret;
+  }
+  if (envSecret) {
+    console.warn("[auth] TOKEN_SECRET is shorter than 16 characters — ignoring it.");
+  }
+  // Generated once, stored next to the database, never shipped to the client.
+  cachedSecret = getOrCreateSecret(".token-secret", "TOKEN_SECRET");
+  return cachedSecret;
+}
+
+function signToken(userId: string, purpose: TokenPurpose, ttlSeconds: number): string {
+  const expiresAt = Math.floor(Date.now() / 1000) + ttlSeconds;
+  const payload = `${userId}:${purpose}:${expiresAt}`;
+  const hmac = crypto
+    .createHmac("sha256", getTokenSecret())
+    .update(payload)
+    .digest("hex")
+    .slice(0, 32);
+  return `v1_${userId}_${purpose}_${expiresAt}_${hmac}`;
+}
+
+function verifyToken(token: string, purpose: TokenPurpose): { userId: string; valid: boolean } {
+  const invalid = { userId: "", valid: false };
+  if (!token || !token.startsWith("v1_")) return invalid;
+
+  const rest = token.slice(3);
+  const lastUnderscore = rest.lastIndexOf("_");
+  if (lastUnderscore < 1) return invalid;
+
+  const hmac = rest.slice(lastUnderscore + 1);
+  const withoutHmac = rest.slice(0, lastUnderscore); // userId_purpose_expiresAt
+  const purposeSplit = withoutHmac.lastIndexOf("_");
+  if (purposeSplit < 1) return invalid;
+
+  const userIdEnd = withoutHmac.lastIndexOf("_", purposeSplit - 1);
+  if (userIdEnd < 1) return invalid;
+
+  const userId = withoutHmac.slice(0, userIdEnd);
+  const tokenPurpose = withoutHmac.slice(userIdEnd + 1, purposeSplit);
+  const expiresAt = parseInt(withoutHmac.slice(purposeSplit + 1), 10);
+
+  if (!userId || tokenPurpose !== purpose || Number.isNaN(expiresAt)) return invalid;
+  if (Math.floor(Date.now() / 1000) > expiresAt) return invalid;
+
+  const expected = crypto
+    .createHmac("sha256", getTokenSecret())
+    .update(`${userId}:${purpose}:${expiresAt}`)
+    .digest("hex")
+    .slice(0, 32);
+
+  if (hmac.length !== expected.length) return invalid;
+  const valid = crypto.timingSafeEqual(Buffer.from(hmac), Buffer.from(expected));
+  return { userId: valid ? userId : "", valid };
+}
+
+// ---------------------------------------------------------------------------
+// Rate limiting — fixed-window counters shared across ALL instances via the
+// store (Postgres in production; in-memory in the JSON dev driver).
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether the platform in front of us is a trusted reverse proxy that sets
+ * X-Forwarded-For. On Vercel the edge always sets it and the function is not
+ * directly reachable, so it is trustworthy. For self-hosted setups set
+ * TRUSTED_PROXY=1 (or a comma-separated list of proxy IPs). When untrusted we
+ * ignore the header entirely so a client cannot spoof many distinct IPs to
+ * multiply its rate-limit budget.
+ */
+function trustsForwardedHeaders(): boolean {
+  if (process.env["TRUSTED_PROXY"] === "0" || process.env["TRUSTED_PROXY"] === "false") {
+    return false;
+  }
+  if (process.env["TRUSTED_PROXY"] === "1" || process.env["TRUSTED_PROXY"] === "true") {
+    return true;
+  }
+  // Default: trust only when running on Vercel's edge (the only way the
+  // function is exposed there).
+  return Boolean(process.env["VERCEL"]);
+}
+
+function clientIp(request: Request): string {
+  if (trustsForwardedHeaders()) {
+    const forwarded = request.headers.get("x-forwarded-for");
+    if (forwarded) {
+      const first = forwarded.split(",")[0];
+      if (first) return first.trim();
+    }
+  }
+  // Not behind a trusted proxy: fall back to a stable per-connection key. On
+  // Vercel the header is always present, so this is only for direct exposure.
+  return request.headers.get("x-real-ip") || "local";
+}
+
+/**
+ * Shared rate-limit check. Delegates to the store so every serverless instance
+ * sees the same counter — a distributed burst cannot bypass the configured cap.
+ */
+async function takeRateLimit(
+  key: string,
+  max: number,
+  windowMs: number,
+): Promise<{ ok: boolean; retryAfter: number }> {
+  return (await readyStore()).takeRateLimit(key, max, windowMs);
+}
+
+function tooManyAttempts(retryAfter: number): Response {
+  return jsonResponse(
+    {
+      success: false,
+      message: "Too many attempts. Please wait and try again.",
+      error: { message: "Too many attempts. Please wait and try again.", status: 429 },
+    },
+    429,
+    { "Retry-After": String(retryAfter) },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Response helpers
+// ---------------------------------------------------------------------------
+
+function jsonResponse(data: unknown, status = 200, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(data), {
     status,
-    headers: {
-      "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    },
+    headers: { "Content-Type": "application/json", ...headers },
   });
 }
 
@@ -27,37 +297,146 @@ function errorResponse(message: string, status = 400): Response {
   return jsonResponse({ success: false, message, error: { message, status } }, status);
 }
 
+function successResponse<T>(data: T, status = 200): Response {
+  return jsonResponse({ success: true, data }, status);
+}
+
+/** Parses a JSON object body; anything else (null, array, garbage) becomes {}. */
+async function readJson(request: Request): Promise<Record<string, unknown>> {
+  const parsed: unknown = await request.json().catch(() => null);
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    return parsed as Record<string, unknown>;
+  }
+  return {};
+}
+
+/** Never leak the stored password hash to a client. */
+function safeUser(user: UserRecord): Omit<UserRecord, "password"> {
+  const { password: _omit, ...rest } = user;
+  void _omit;
+  return rest;
+}
+
+/**
+ * Mints a signed access token AND records it in the server-side session
+ * ledger, so it can be revoked later (logout, password change). Returns the
+ * public session shape the client stores. `reset` tokens are not registered —
+ * they are single-use and tracked separately by the reset-token ledger.
+ */
+async function sessionFor(
+  user: UserRecord,
+  purpose: TokenPurpose = "access",
+): Promise<ReturnType<typeof buildSession>> {
+  const session = buildSession(user, purpose);
+  if (purpose === "access") {
+    const expiresAt = Math.floor(Date.now() / 1000) + ACCESS_TOKEN_TTL_SECONDS;
+    await (await readyStore()).createSession(sessionKey(session.access_token), user.id, expiresAt);
+  }
+  return session;
+}
+
+function buildSession(user: UserRecord, purpose: TokenPurpose) {
+  const access_token = signToken(user.id, purpose, ACCESS_TOKEN_TTL_SECONDS);
+  return {
+    access_token,
+    token_type: "bearer",
+    expires_in: ACCESS_TOKEN_TTL_SECONDS,
+    user: safeUser(user),
+  };
+}
+
 function parseBearerToken(authHeader: string | null): string {
   if (!authHeader) return "";
   const parts = authHeader.split(" ");
-  if (parts.length === 2 && /^bearer$/i.test(parts[0])) {
-    return parts[1].trim();
+  const first = parts[0];
+  const second = parts[1];
+  if (parts.length === 2 && first && /^bearer$/i.test(first) && second) {
+    return second.trim();
   }
   return authHeader.trim();
 }
 
-function getAuthUserFromToken(token: string): UserRecord | null {
+/**
+ * Only HMAC-signed tokens are accepted AND still live in the session ledger.
+ * Unsigned/forged tokens (including the retired `jwt_*` format) are rejected
+ * outright; so are tokens that were revoked by logout or a password change.
+ */
+async function getAuthUserFromToken(token: string): Promise<UserRecord | null> {
   if (!token) return null;
-  const db = loadDatabase();
+  const { userId, valid } = verifyToken(token, "access");
+  if (!valid || !userId) return null;
+  const active = await (await readyStore()).isSessionActive(sessionKey(token));
+  if (!active) return null;
+  const db = await loadDatabase();
+  return db.users.find((u) => u.id === userId) ?? null;
+}
 
-  // Token format: "jwt_<userId>_<timestamp>" or standard token
-  if (token.startsWith("jwt_")) {
-    const lastUnderscore = token.lastIndexOf("_");
-    if (lastUnderscore > 4) {
-      const userId = token.slice(4, lastUnderscore);
-      const user = db.users.find((u) => u.id === userId);
-      if (user) return user;
+// ---------------------------------------------------------------------------
+// Email verification codes (login link / password reset)
+// ---------------------------------------------------------------------------
+
+const CODE_TTL_MS = 15 * 60 * 1000;
+const MAX_CODE_ATTEMPTS = 5;
+
+function hashCode(code: string): string {
+  return crypto.createHash("sha256").update(code).digest("hex");
+}
+
+function generateCode(): string {
+  return crypto.randomInt(0, 1_000_000).toString().padStart(6, "0");
+}
+
+function isEmailConfigured(): boolean {
+  return Boolean(process.env["RESEND_API_KEY"]);
+}
+
+function isProductionServer(): boolean {
+  return process.env["NODE_ENV"] === "production" || Boolean(process.env["VERCEL"]);
+}
+
+/**
+ * Delivers a code by email. Returns true when an email provider is configured.
+ * Without a provider the code is only written to the server console in
+ * development — it is never returned in an API response.
+ */
+async function deliverCode(email: string, code: string, purpose: CodePurpose): Promise<boolean> {
+  const apiKey = process.env["RESEND_API_KEY"];
+  if (!apiKey) {
+    if (!isProductionServer()) {
+      console.info(
+        `[auth] ${purpose === "login" ? "Login" : "Password reset"} code for ${email}: ${code}`,
+      );
     }
-    // Fallback if token was jwt_<userId> without timestamp
-    const fallbackId = token.slice(4);
-    const userFallback = db.users.find((u) => u.id === fallbackId);
-    if (userFallback) return userFallback;
+    return false;
   }
 
-  // Token format: token string matching user ID directly or stored in db
-  const found = db.users.find((u) => u.id === token);
-  return found || null;
+  const from = process.env["RESEND_FROM"] || "onboarding@resend.dev";
+  const subject = purpose === "login" ? "Your login code" : "Your password reset code";
+  const text =
+    purpose === "login"
+      ? `Your login code is ${code}. It is valid for 15 minutes.\n\nIf you did not request this, you can ignore this email.`
+      : `Your password reset code is ${code}. It is valid for 15 minutes.\n\nIf you did not request this, you can ignore this email.`;
+
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from, to: [email], subject, text }),
+    });
+    if (!res.ok) {
+      console.error(`[auth] email delivery failed (${res.status}): ${await res.text()}`);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error("[auth] email delivery failed:", e);
+    return false;
+  }
 }
+
+// ---------------------------------------------------------------------------
+// Main API handler
+// ---------------------------------------------------------------------------
 
 export async function handleApiFetch(request: Request): Promise<Response> {
   const url = new URL(request.url);
@@ -75,241 +454,431 @@ export async function handleApiFetch(request: Request): Promise<Response> {
     });
   }
 
+  const ip = clientIp(request);
   const authHeader = request.headers.get("authorization");
   const token = parseBearerToken(authHeader);
-  const authUser = getAuthUserFromToken(token);
+  const authUser = await getAuthUserFromToken(token);
 
   // 1. Health check
   if (path === "/api/health" && method === "GET") {
-    return jsonResponse({
-      success: true,
-      data: { status: "ok", database: "connected" },
-    });
+    return successResponse({ status: "ok", database: "connected" });
   }
 
   // 2. Authentication: Register
   if (path === "/api/auth/register" && method === "POST") {
-    const body = (await request.json().catch(() => ({}))) as {
-      email?: string;
-      password?: string;
-      fullName?: string;
-      mobile?: string;
-    };
-    const email = (body.email || "").trim().toLowerCase();
-    if (!email) return errorResponse("Email is required.", 400);
+    const limit = await takeRateLimit(`register:${ip}`, 5, 60 * 60 * 1000);
+    if (!limit.ok) return tooManyAttempts(limit.retryAfter);
 
-    const db = loadDatabase();
-    const existing = db.users.find((u) => u.email.toLowerCase() === email);
-    if (existing) {
+    const body = await readJson(request);
+    const email = normalizeEmail(body["email"]);
+    const password = body["password"];
+
+    if (!isValidEmail(email)) return errorResponse("Enter a valid email address.", 400);
+    const passwordError = validatePassword(password);
+    if (passwordError) return errorResponse(passwordError, 400);
+
+    const fullName = cleanString(body["fullName"], NAME_MAX);
+    const mobile = cleanString(body["mobile"], 20);
+    if (fullName.length < 2) return errorResponse("Enter your full name.", 400);
+    if (!/^[6-9]\d{9}$/.test(mobile))
+      return errorResponse("Enter a valid 10-digit mobile number.", 400);
+
+    const hashedPassword = await hashPassword(password as string);
+    const userId = `usr_${crypto.randomUUID()}`;
+
+    const created = await withDatabase((db) => {
+      if (db.users.some((u) => u.email.toLowerCase() === email)) {
+        return null;
+      }
+      const newUser: UserRecord = {
+        id: userId,
+        email,
+        password: hashedPassword,
+        fullName,
+        mobile,
+        createdAt: new Date().toISOString(),
+      };
+      db.users.push(newUser);
+      return newUser;
+    });
+
+    if (!created) {
       return errorResponse("An account with this email already exists.", 400);
     }
 
-    const userId = generateStableUserId(email);
-    const newUser: UserRecord = {
-      id: userId,
-      email,
-      password: body.password || "",
-      fullName: (body.fullName || "").trim(),
-      mobile: (body.mobile || "").trim(),
-      createdAt: new Date().toISOString(),
-    };
-
-    db.users.push(newUser);
-    saveDatabase(db);
-
-    const session = {
-      access_token: `jwt_${userId}_${Date.now()}`,
-      token_type: "bearer",
-      expires_in: 3600 * 24 * 30,
-      user: newUser,
-    };
-
-    return jsonResponse({ success: true, data: { user: newUser, session } }, 201);
+    return successResponse({ user: safeUser(created), session: await sessionFor(created) }, 201);
   }
 
   // 3. Authentication: Login
   if (path === "/api/auth/login" && method === "POST") {
-    const body = (await request.json().catch(() => ({}))) as {
-      email?: string;
-      password?: string;
-    };
-    const email = (body.email || "").trim().toLowerCase();
-    const password = body.password || "";
-    if (!email || !password) {
+    const body = await readJson(request);
+    const email = normalizeEmail(body["email"]);
+    const password = typeof body["password"] === "string" ? body["password"] : "";
+
+    if (!isValidEmail(email) || !password) {
       return errorResponse("Email and password are required.", 400);
     }
 
-    const db = loadDatabase();
-    const user = db.users.find((u) => u.email.toLowerCase() === email);
+    const limit = await takeRateLimit(`login:${ip}:${email}`, 8, 5 * 60 * 1000);
+    if (!limit.ok) return tooManyAttempts(limit.retryAfter);
 
-    // CRITICAL: Never create a new user on login!
-    if (!user) {
-      return errorResponse("Invalid email or password.", 400);
+    // Same message and same work for unknown user vs. wrong password.
+    const invalidCredentials = () => errorResponse("Invalid email or password.", 401);
+
+    const result = await withDatabase(async (db) => {
+      const user = db.users.find((u) => u.email.toLowerCase() === email);
+      if (!user) return { user: null, upgraded: false };
+
+      const passwordOk = await verifyPassword(password, user.password || "");
+      if (!passwordOk) return { user: null, upgraded: false };
+
+      let upgraded = false;
+      if (user.password && !isHashedPassword(user.password)) {
+        user.password = await hashPassword(password);
+        upgraded = true;
+      }
+      return { user, upgraded };
+    });
+
+    if (!result.user) return invalidCredentials();
+    return successResponse({
+      user: safeUser(result.user),
+      session: await sessionFor(result.user),
+    });
+  }
+
+  // 3b. Request a login / password-reset code (sent by email)
+  if (path === "/api/auth/email-code" && method === "POST") {
+    const body = await readJson(request);
+    const email = normalizeEmail(body["email"]);
+    const purpose: unknown = body["purpose"];
+    if (!isValidEmail(email)) return errorResponse("Enter a valid email address.", 400);
+    if (purpose !== "login" && purpose !== "reset") {
+      return errorResponse("Invalid code purpose.", 400);
     }
 
-    if (user.password && user.password !== password) {
-      return errorResponse("Invalid email or password.", 400);
+    // In production, email delivery is the only way the user ever sees this
+    // code. Without a provider we must fail fast with a clear configuration
+    // error rather than store an undeliverable code and imply success.
+    if (isProductionServer() && !isEmailConfigured()) {
+      console.error(
+        "[auth] email login/reset requested in production but RESEND_API_KEY is not set. " +
+          "Configure RESEND_API_KEY (and RESEND_FROM) to enable email codes.",
+      );
+      return errorResponse(
+        "Email delivery is not configured on the server. Contact the administrator.",
+        503,
+      );
     }
 
-    const session = {
-      access_token: `jwt_${user.id}_${Date.now()}`,
-      token_type: "bearer",
-      expires_in: 3600 * 24 * 30,
-      user,
-    };
+    const byIp = await takeRateLimit(`code:${ip}`, 10, 60 * 60 * 1000);
+    if (!byIp.ok) return tooManyAttempts(byIp.retryAfter);
+    const byEmail = await takeRateLimit(`code:${email}`, 3, 15 * 60 * 1000);
+    if (!byEmail.ok) return tooManyAttempts(byEmail.retryAfter);
 
-    return jsonResponse({ success: true, data: { user, session } });
+    const code = generateCode();
+    const emailSent = await withDatabase((db) => {
+      const user = db.users.find((u) => u.email.toLowerCase() === email);
+      if (!user) return false;
+      // One live code per email+purpose.
+      db.pendingTokens = db.pendingTokens.filter(
+        (t) => !(t.email === email && t.purpose === purpose && !t.used),
+      );
+      const record: PendingTokenRecord = {
+        token: hashCode(code),
+        email,
+        userId: user.id,
+        purpose,
+        expiresAt: Date.now() + CODE_TTL_MS,
+        used: false,
+        attempts: 0,
+        createdAt: Date.now(),
+      };
+      db.pendingTokens.push(record);
+      return true;
+    });
+
+    if (emailSent) {
+      await deliverCode(email, code, purpose);
+    }
+
+    // Identical response whether or not the account exists — prevents
+    // probing which emails are registered.
+    return successResponse({
+      delivered: isEmailConfigured(),
+      devMode: !isEmailConfigured() && !isProductionServer(),
+      expiresInMinutes: CODE_TTL_MS / 60_000,
+    });
+  }
+
+  // 3c. Verify a code — signs the user in, or returns a short-lived reset token
+  if (path === "/api/auth/verify-code" && method === "POST") {
+    const body = await readJson(request);
+    const email = normalizeEmail(body["email"]);
+    const code = typeof body["code"] === "string" ? body["code"].trim() : "";
+    const purpose: unknown = body["purpose"];
+    if (!isValidEmail(email)) return errorResponse("Enter a valid email address.", 400);
+    if (purpose !== "login" && purpose !== "reset") {
+      return errorResponse("Invalid code purpose.", 400);
+    }
+
+    const byIp = await takeRateLimit(`verify:${ip}`, 10, 15 * 60 * 1000);
+    if (!byIp.ok) return tooManyAttempts(byIp.retryAfter);
+    const byEmail = await takeRateLimit(`verify:${email}`, 5, 15 * 60 * 1000);
+    if (!byEmail.ok) return tooManyAttempts(byEmail.retryAfter);
+
+    const outcome = await withDatabase((db) => {
+      const pending = db.pendingTokens
+        .filter((t) => t.email === email && t.purpose === purpose && !t.used)
+        .sort((a, b) => b.createdAt - a.createdAt)[0];
+
+      if (!pending || pending.expiresAt < Date.now()) {
+        if (pending) pending.used = true;
+        return { status: "expired" as const };
+      }
+
+      // Count every guess, not just matching ones — limits brute-forcing
+      // the 6-digit code space.
+      pending.attempts += 1;
+      if (pending.attempts > MAX_CODE_ATTEMPTS) {
+        pending.used = true;
+        return { status: "locked" as const };
+      }
+
+      if (!code || pending.token !== hashCode(code)) {
+        return { status: "invalid" as const };
+      }
+
+      pending.used = true;
+      const user = db.users.find((u) => u.id === pending.userId) ?? null;
+      if (!user) return { status: "expired" as const };
+      return { status: "ok" as const, user };
+    });
+
+    if (outcome.status !== "ok") {
+      if (outcome.status === "locked") {
+        return errorResponse("Too many incorrect attempts. Request a new code.", 400);
+      }
+      if (outcome.status === "expired") {
+        return errorResponse("This code has expired. Request a new one.", 400);
+      }
+      return errorResponse("Incorrect code. Please try again.", 400);
+    }
+
+    if (purpose === "login") {
+      return successResponse({
+        user: safeUser(outcome.user),
+        session: await sessionFor(outcome.user),
+      });
+    }
+
+    const resetToken = signToken(outcome.user.id, "reset", RESET_TOKEN_TTL_SECONDS);
+    return successResponse({ resetToken, expiresIn: RESET_TOKEN_TTL_SECONDS });
+  }
+
+  // 3d. Complete a password reset — requires a verified reset token
+  if (path === "/api/auth/reset-password" && method === "POST") {
+    const body = await readJson(request);
+    const email = normalizeEmail(body["email"]);
+    const resetToken = typeof body["resetToken"] === "string" ? body["resetToken"] : "";
+    const newPassword = body["newPassword"];
+
+    const limit = await takeRateLimit(`reset:${ip}`, 5, 15 * 60 * 1000);
+    if (!limit.ok) return tooManyAttempts(limit.retryAfter);
+
+    if (!resetToken) {
+      return errorResponse("A verified reset code is required to change a password.", 400);
+    }
+    const passwordError = validatePassword(newPassword);
+    if (passwordError) return errorResponse(passwordError, 400);
+
+    const { userId, valid } = verifyToken(resetToken, "reset");
+    if (!valid || !userId) {
+      return errorResponse("This reset code has expired. Request a new one.", 400);
+    }
+
+    // Reset tokens are single-use: the spent token is recorded and rejected.
+    const tokenHash = crypto.createHash("sha256").update(resetToken).digest("hex");
+    const hashedPassword = await hashPassword(newPassword as string);
+
+    const outcome = await withDatabase((db) => {
+      const consumed = db.consumedResetTokens ?? [];
+      if (consumed.some((c) => c.hash === tokenHash)) return { status: "used" as const };
+
+      const user = db.users.find((u) => u.id === userId && u.email.toLowerCase() === email);
+      if (!user) return { status: "expired" as const };
+
+      user.password = hashedPassword;
+      db.consumedResetTokens = [...consumed, { hash: tokenHash, at: Date.now() }];
+      db.pendingTokens = db.pendingTokens.filter((t) => t.email !== email);
+      return { status: "ok" as const };
+    });
+
+    if (outcome.status === "used") {
+      return errorResponse("This reset code has already been used. Request a new one.", 400);
+    }
+    if (outcome.status !== "ok") {
+      return errorResponse("This reset code has expired. Request a new one.", 400);
+    }
+    // A password reset means the old credentials may be compromised: revoke
+    // every session for this user so any hijacked token stops working.
+    await (await readyStore()).revokeAllSessions(userId);
+    return successResponse({ message: "Password updated successfully." });
+  }
+
+  // 3b. Logout — revoke the presented access token server-side. Idempotent:
+  // a missing/already-revoked token still returns success so the client can
+  // always clear its local state.
+  if (path === "/api/auth/logout" && method === "POST") {
+    const token = parseBearerToken(request.headers.get("authorization"));
+    if (token) {
+      await (await readyStore()).revokeSession(sessionKey(token));
+    }
+    return successResponse({ message: "Signed out." });
   }
 
   // 4. Current user session
   if (path === "/api/auth/me" && method === "GET") {
     if (!authUser) return errorResponse("Authentication is required.", 401);
-    return jsonResponse({ success: true, data: { user: authUser } });
+    return successResponse({ user: safeUser(authUser) });
   }
 
-  // 4b. Update user profile/password directly in database
+  // 4b. Update user profile/password (requires an access token)
   if (
     (path === "/api/auth/update" || path === "/api/auth/profile") &&
     (method === "POST" || method === "PUT")
   ) {
     if (!authUser) return errorResponse("Authentication is required.", 401);
-    const body = (await request.json().catch(() => ({}))) as {
-      password?: string;
-      fullName?: string;
-      mobile?: string;
-      user_metadata?: Record<string, unknown>;
-    };
-    const db = loadDatabase();
-    const userIndex = db.users.findIndex((u) => u.id === authUser.id);
-    if (userIndex === -1) return errorResponse("User not found.", 404);
+    const limit = await takeRateLimit(`update:${ip}`, 20, 5 * 60 * 1000);
+    if (!limit.ok) return tooManyAttempts(limit.retryAfter);
 
-    if (body.password) {
-      db.users[userIndex].password = body.password;
-    }
-    if (body.fullName !== undefined) {
-      db.users[userIndex].fullName = body.fullName.trim();
-    }
-    if (body.mobile !== undefined) {
-      db.users[userIndex].mobile = body.mobile.trim();
-    }
+    const body = await readJson(request);
 
-    // Also sync to settings record if fullName or mobile was updated
-    const sIndex = db.settings.findIndex((s) => s.userId === authUser.id);
-    if (sIndex !== -1) {
-      if (body.fullName) db.settings[sIndex].fullName = body.fullName.trim();
-      if (body.mobile) {
-        db.settings[sIndex].mobileNumber = body.mobile.trim();
-        db.settings[sIndex].contactNumber = body.mobile.trim();
+    let newPasswordHash: string | null = null;
+    if (body["password"] !== undefined && body["password"] !== "") {
+      const passwordError = validatePassword(body["password"]);
+      if (passwordError) return errorResponse(passwordError, 400);
+      newPasswordHash = await hashPassword(body["password"] as string);
+    }
+    const fullName =
+      body["fullName"] !== undefined ? cleanString(body["fullName"], NAME_MAX) : undefined;
+    const mobile = body["mobile"] !== undefined ? cleanString(body["mobile"], 20) : undefined;
+
+    const updated = await withDatabase((db) => {
+      const user = db.users.find((u) => u.id === authUser.id);
+      if (!user) return null;
+      if (newPasswordHash) user.password = newPasswordHash;
+      if (fullName !== undefined) user.fullName = fullName;
+      if (mobile !== undefined) user.mobile = mobile;
+
+      const settings = db.settings.find((s) => s.userId === authUser.id);
+      if (settings) {
+        if (fullName) settings.fullName = fullName;
+        if (mobile) {
+          settings.mobileNumber = mobile;
+          settings.contactNumber = mobile;
+        }
       }
-    }
+      return user;
+    });
 
-    saveDatabase(db);
-    const updatedUser = db.users[userIndex];
-    const session = {
-      access_token: token || `jwt_${updatedUser.id}_${Date.now()}`,
-      token_type: "bearer",
-      expires_in: 3600 * 24 * 30,
-      user: updatedUser,
-    };
-    return jsonResponse({ success: true, data: { user: updatedUser, session } });
+    if (!updated) return errorResponse("User not found.", 404);
+    // Changing the password revokes every other session for this user. The
+    // fresh token minted by sessionFor() below re-activates only the current
+    // device, so the user stays signed in here but everywhere else must re-login.
+    if (newPasswordHash) {
+      await (await readyStore()).revokeAllSessions(updated.id);
+    }
+    return successResponse({ user: safeUser(updated), session: await sessionFor(updated) });
   }
 
-  // 4c. Reset password endpoint
-  if (path === "/api/auth/reset-password" && method === "POST") {
-    const body = (await request.json().catch(() => ({}))) as {
-      email?: string;
-      newPassword?: string;
-    };
-    const email = (body.email || "").trim().toLowerCase();
-    if (!email) return errorResponse("Email is required.", 400);
-
-    const db = loadDatabase();
-    const userIndex = db.users.findIndex((u) => u.email.toLowerCase() === email);
-    if (userIndex === -1) return errorResponse("No registered account found with this email.", 404);
-
-    if (body.newPassword) {
-      db.users[userIndex].password = body.newPassword;
-      saveDatabase(db);
-      return jsonResponse({ success: true, message: "Password updated successfully." });
-    }
-
-    return jsonResponse({ success: true, message: "Account verified for password reset." });
-  }
-
-  // 5. Protected routes require valid authenticated user
+  // 5. Protected routes require a valid signed access token
   if (!authUser) {
     return errorResponse("Authentication is required.", 401);
   }
 
   const userId = authUser.id;
-  const db = loadDatabase();
+  const db = await loadDatabase();
 
   // 6. Vehicles API
   if (path === "/api/vehicles") {
     if (method === "GET") {
-      const userVehicles = db.vehicles.filter((v) => v.userId === userId);
-      return jsonResponse({ success: true, data: userVehicles });
+      return successResponse(db.vehicles.filter((v) => v.userId === userId));
     }
 
     if (method === "POST") {
-      const body = (await request.json().catch(() => ({}))) as Partial<VehicleRecord>;
+      const body = (await readJson(request)) as Partial<VehicleRecord>;
       const now = new Date().toISOString();
       const newVehicle: VehicleRecord = {
-        _id: body._id || `veh_${crypto.randomUUID()}`,
+        // IDs are always generated server-side.
+        _id: `veh_${crypto.randomUUID()}`,
         userId,
-        name: (body.name || "").trim(),
-        type: (body.type || "Truck").trim(),
-        model: (body.model || "").trim(),
-        vehicleNumber: (body.vehicleNumber || "").trim(),
-        notes: (body.notes || "").trim(),
+        name: cleanString(body.name),
+        type: cleanString(body.type) || "Truck",
+        model: cleanString(body.model),
+        vehicleNumber: cleanString(body.vehicleNumber),
+        notes: cleanString(body.notes, NOTES_MAX),
         isActive: body.isActive ?? true,
         createdAt: now,
         updatedAt: now,
       };
 
-      db.vehicles.push(newVehicle);
-      saveDatabase(db);
-      return jsonResponse({ success: true, data: newVehicle }, 201);
+      await withDatabase((d) => {
+        d.vehicles.push(newVehicle);
+      });
+      return successResponse(newVehicle, 201);
     }
   }
 
   if (path.startsWith("/api/vehicles/")) {
     const vehicleId = path.replace("/api/vehicles/", "").split("/")[0];
-    const index = db.vehicles.findIndex((v) => v._id === vehicleId && v.userId === userId);
 
     if (method === "GET") {
-      if (index === -1) return errorResponse("Vehicle not found", 404);
-      return jsonResponse({ success: true, data: db.vehicles[index] });
+      const found = db.vehicles.find((v) => v._id === vehicleId && v.userId === userId);
+      if (!found) return errorResponse("Vehicle not found", 404);
+      return successResponse(found);
     }
 
     if (method === "PUT") {
-      if (index === -1) return errorResponse("Vehicle not found", 404);
-      const body = (await request.json().catch(() => ({}))) as Partial<VehicleRecord>;
-      const existing = db.vehicles[index];
-      const updated: VehicleRecord = {
-        ...existing,
-        name: body.name !== undefined ? body.name.trim() : existing.name,
-        type: body.type !== undefined ? body.type.trim() : existing.type,
-        model: body.model !== undefined ? body.model.trim() : existing.model,
-        vehicleNumber:
-          body.vehicleNumber !== undefined ? body.vehicleNumber.trim() : existing.vehicleNumber,
-        notes: body.notes !== undefined ? body.notes.trim() : existing.notes,
-        isActive: body.isActive !== undefined ? body.isActive : existing.isActive,
-        updatedAt: new Date().toISOString(),
-      };
-      db.vehicles[index] = updated;
-      saveDatabase(db);
-      return jsonResponse({ success: true, data: updated });
+      const body = (await readJson(request)) as Partial<VehicleRecord>;
+      const updated = await withDatabase((d) => {
+        const index = d.vehicles.findIndex((v) => v._id === vehicleId && v.userId === userId);
+        if (index === -1) return null;
+        const existing = d.vehicles[index];
+        if (!existing) return null;
+        const next: VehicleRecord = {
+          _id: existing._id,
+          userId: existing.userId,
+          createdAt: existing.createdAt,
+          name: body.name !== undefined ? cleanString(body.name) : existing.name,
+          type: body.type !== undefined ? cleanString(body.type) : existing.type,
+          model: body.model !== undefined ? cleanString(body.model) : existing.model,
+          vehicleNumber:
+            body.vehicleNumber !== undefined
+              ? cleanString(body.vehicleNumber)
+              : existing.vehicleNumber,
+          notes: body.notes !== undefined ? cleanString(body.notes, NOTES_MAX) : existing.notes,
+          isActive: body.isActive !== undefined ? Boolean(body.isActive) : existing.isActive,
+          updatedAt: new Date().toISOString(),
+        };
+        d.vehicles[index] = next;
+        return next;
+      });
+      if (!updated) return errorResponse("Vehicle not found", 404);
+      return successResponse(updated);
     }
 
     if (method === "DELETE") {
-      if (index === -1) return errorResponse("Vehicle not found", 404);
-      db.vehicles.splice(index, 1);
-      const priorTripCount = db.trips.length;
-      db.trips = db.trips.filter((t) => !(t.vehicleId === vehicleId && t.userId === userId));
-      const deletedTrips = priorTripCount - db.trips.length;
-      saveDatabase(db);
-      return jsonResponse({ success: true, data: { deletedTrips } });
+      const result = await withDatabase((d) => {
+        const index = d.vehicles.findIndex((v) => v._id === vehicleId && v.userId === userId);
+        if (index === -1) return null;
+        d.vehicles.splice(index, 1);
+        const priorTripCount = d.trips.length;
+        d.trips = d.trips.filter((t) => !(t.vehicleId === vehicleId && t.userId === userId));
+        return { deletedTrips: priorTripCount - d.trips.length };
+      });
+      if (!result) return errorResponse("Vehicle not found", 404);
+      return successResponse(result);
     }
   }
 
@@ -328,99 +897,106 @@ export async function handleApiFetch(request: Request): Promise<Response> {
       if (toDate) trips = trips.filter((t) => t.date <= toDate);
 
       trips.sort((a, b) => b.date.localeCompare(a.date));
-      return jsonResponse({ success: true, data: trips });
+      return successResponse(trips);
     }
 
     if (method === "POST") {
-      const body = (await request.json().catch(() => ({}))) as Partial<TripRecord>;
+      const body = (await readJson(request)) as Partial<TripRecord>;
       const now = new Date().toISOString();
-      const items: OtherExpenseItem[] = Array.isArray(body.otherExpenseItems)
-        ? body.otherExpenseItems.map((i) => ({
-            name: String(i.name || "").trim(),
-            amount: Number(i.amount) || 0,
-          }))
-        : [];
-      const otherExpenses = items.reduce((sum, i) => sum + i.amount, 0);
+      const items = normalizeExpenseItems(body.otherExpenseItems);
 
       const newTrip: TripRecord = {
-        _id: body._id || `trp_${crypto.randomUUID()}`,
+        _id: `trp_${crypto.randomUUID()}`,
         userId,
-        vehicleId: String(body.vehicleId || ""),
-        date: String(body.date || now.slice(0, 10)),
-        income: Number(body.income) || 0,
-        diesel: Number(body.diesel) || 0,
-        driverPayment: Number(body.driverPayment) || 0,
-        emiShare: Number(body.emiShare) || 0,
+        vehicleId: cleanString(body.vehicleId),
+        date: DATE_RE.test(String(body.date || "")) ? String(body.date) : now.slice(0, 10),
+        income: toAmount(body.income),
+        diesel: toAmount(body.diesel),
+        driverPayment: toAmount(body.driverPayment),
+        emiShare: toAmount(body.emiShare),
         otherExpenseItems: items,
-        otherExpenses: body.otherExpenses ?? otherExpenses,
-        notes: String(body.notes || "").trim(),
+        otherExpenses: sumItems(items),
+        notes: cleanString(body.notes, NOTES_MAX),
         createdAt: now,
         updatedAt: now,
       };
 
-      db.trips.push(newTrip);
-      saveDatabase(db);
-      return jsonResponse({ success: true, data: newTrip }, 201);
+      await withDatabase((d) => {
+        d.trips.push(newTrip);
+      });
+      return successResponse(newTrip, 201);
     }
   }
 
   if (path.startsWith("/api/trips/")) {
     const tripId = path.replace("/api/trips/", "").split("/")[0];
-    const index = db.trips.findIndex((t) => t._id === tripId && t.userId === userId);
 
     if (method === "GET") {
-      if (index === -1) return errorResponse("Trip not found", 404);
-      return jsonResponse({ success: true, data: db.trips[index] });
+      const found = db.trips.find((t) => t._id === tripId && t.userId === userId);
+      if (!found) return errorResponse("Trip not found", 404);
+      return successResponse(found);
     }
 
     if (method === "PUT") {
-      if (index === -1) return errorResponse("Trip not found", 404);
-      const body = (await request.json().catch(() => ({}))) as Partial<TripRecord>;
-      const existing = db.trips[index];
-      const items: OtherExpenseItem[] = Array.isArray(body.otherExpenseItems)
-        ? body.otherExpenseItems.map((i) => ({
-            name: String(i.name || "").trim(),
-            amount: Number(i.amount) || 0,
-          }))
-        : existing.otherExpenseItems;
-      const otherExpenses = items.reduce((sum, i) => sum + i.amount, 0);
-
-      const updated: TripRecord = {
-        ...existing,
-        vehicleId: body.vehicleId ?? existing.vehicleId,
-        date: body.date ?? existing.date,
-        income: body.income !== undefined ? Number(body.income) || 0 : existing.income,
-        diesel: body.diesel !== undefined ? Number(body.diesel) || 0 : existing.diesel,
-        driverPayment:
-          body.driverPayment !== undefined
-            ? Number(body.driverPayment) || 0
-            : existing.driverPayment,
-        emiShare: body.emiShare !== undefined ? Number(body.emiShare) || 0 : existing.emiShare,
-        otherExpenseItems: items,
-        otherExpenses,
-        notes: body.notes !== undefined ? String(body.notes).trim() : existing.notes,
-        updatedAt: new Date().toISOString(),
-      };
-      db.trips[index] = updated;
-      saveDatabase(db);
-      return jsonResponse({ success: true, data: updated });
+      const body = (await readJson(request)) as Partial<TripRecord>;
+      const updated = await withDatabase((d) => {
+        const index = d.trips.findIndex((t) => t._id === tripId && t.userId === userId);
+        if (index === -1) return null;
+        const existing = d.trips[index];
+        if (!existing) return null;
+        const items =
+          body.otherExpenseItems !== undefined
+            ? normalizeExpenseItems(body.otherExpenseItems)
+            : existing.otherExpenseItems;
+        const next: TripRecord = {
+          _id: existing._id,
+          userId: existing.userId,
+          createdAt: existing.createdAt,
+          vehicleId:
+            body.vehicleId !== undefined ? cleanString(body.vehicleId) : existing.vehicleId,
+          date: DATE_RE.test(String(body.date || "")) ? String(body.date) : existing.date,
+          income: body.income !== undefined ? toAmount(body.income) : existing.income,
+          diesel: body.diesel !== undefined ? toAmount(body.diesel) : existing.diesel,
+          driverPayment:
+            body.driverPayment !== undefined
+              ? toAmount(body.driverPayment)
+              : existing.driverPayment,
+          emiShare: body.emiShare !== undefined ? toAmount(body.emiShare) : existing.emiShare,
+          otherExpenseItems: items,
+          // Always derived from the items — one source of truth.
+          otherExpenses: sumItems(items),
+          notes: body.notes !== undefined ? cleanString(body.notes, NOTES_MAX) : existing.notes,
+          updatedAt: new Date().toISOString(),
+        };
+        d.trips[index] = next;
+        return next;
+      });
+      if (!updated) return errorResponse("Trip not found", 404);
+      return successResponse(updated);
     }
 
     if (method === "DELETE") {
-      if (index === -1) return errorResponse("Trip not found", 404);
-      db.trips.splice(index, 1);
-      saveDatabase(db);
-      return jsonResponse({ success: true, data: { _id: tripId } });
+      const removed = await withDatabase((d) => {
+        const index = d.trips.findIndex((t) => t._id === tripId && t.userId === userId);
+        if (index === -1) return false;
+        d.trips.splice(index, 1);
+        return true;
+      });
+      if (!removed) return errorResponse("Trip not found", 404);
+      return successResponse({ _id: tripId });
     }
   }
 
   // 8. Settings API
   if (path === "/api/settings") {
-    let settings = db.settings.find((s) => s.userId === userId);
-
     if (method === "GET") {
-      if (!settings) {
-        settings = {
+      const existing = db.settings.find((s) => s.userId === userId);
+      if (existing) return successResponse(existing);
+
+      const created = await withDatabase((d) => {
+        const found = d.settings.find((s) => s.userId === userId);
+        if (found) return found;
+        const settings: SettingsRecord = {
           _id: `set_${userId}`,
           userId,
           appName: authUser.fullName
@@ -437,73 +1013,88 @@ export async function handleApiFetch(request: Request): Promise<Response> {
           businessEmail: authUser.email || "",
           updatedAt: new Date().toISOString(),
         };
-        db.settings.push(settings);
-        saveDatabase(db);
-      }
-      return jsonResponse({ success: true, data: settings });
+        d.settings.push(settings);
+        return settings;
+      });
+      return successResponse(created);
     }
 
     if (method === "PUT") {
-      const body = (await request.json().catch(() => ({}))) as Partial<SettingsRecord>;
-      const now = new Date().toISOString();
-      const unifiedName = (
-        body.transportationName ||
-        body.businessName ||
-        body.appName ||
-        settings?.transportationName ||
-        settings?.businessName ||
-        settings?.appName ||
-        "Vehicle Calculation System"
-      ).trim();
+      const body = (await readJson(request)) as Partial<SettingsRecord>;
+      const updated = await withDatabase((d) => {
+        const current = d.settings.find((s) => s.userId === userId);
+        const unifiedName = (
+          body.transportationName ||
+          body.businessName ||
+          body.appName ||
+          current?.transportationName ||
+          current?.businessName ||
+          current?.appName ||
+          "Vehicle Calculation System"
+        ).trim();
 
-      const updated: SettingsRecord = {
-        _id: settings?._id || `set_${userId}`,
-        userId,
-        appName: unifiedName,
-        transportationName: unifiedName,
-        businessName: unifiedName,
-        currency: body.currency || settings?.currency || "INR",
-        defaultVehicleId: body.defaultVehicleId ?? settings?.defaultVehicleId ?? null,
-        fullName: (body.fullName ?? settings?.fullName ?? authUser.fullName).trim(),
-        mobileNumber: (body.mobileNumber ?? settings?.mobileNumber ?? authUser.mobile).trim(),
-        address: (body.address ?? settings?.address ?? "").trim(),
-        contactNumber: (body.contactNumber ?? settings?.contactNumber ?? authUser.mobile).trim(),
-        businessEmail: (body.businessEmail ?? settings?.businessEmail ?? authUser.email).trim(),
-        updatedAt: now,
-      };
+        const next: SettingsRecord = {
+          _id: current?._id || `set_${userId}`,
+          userId,
+          appName: unifiedName,
+          transportationName: unifiedName,
+          businessName: unifiedName,
+          currency: cleanString(body.currency, 10) || current?.currency || "INR",
+          defaultVehicleId: body.defaultVehicleId ?? current?.defaultVehicleId ?? null,
+          fullName: cleanString(body.fullName ?? current?.fullName ?? authUser.fullName, NAME_MAX),
+          mobileNumber: cleanString(
+            body.mobileNumber ?? current?.mobileNumber ?? authUser.mobile,
+            20,
+          ),
+          address: cleanString(body.address ?? current?.address ?? "", 500),
+          contactNumber: cleanString(
+            body.contactNumber ?? current?.contactNumber ?? authUser.mobile,
+            20,
+          ),
+          businessEmail: normalizeEmail(
+            body.businessEmail ?? current?.businessEmail ?? authUser.email,
+          ),
+          updatedAt: new Date().toISOString(),
+        };
 
-      const sIndex = db.settings.findIndex((s) => s.userId === userId);
-      if (sIndex === -1) db.settings.push(updated);
-      else db.settings[sIndex] = updated;
-      saveDatabase(db);
-      return jsonResponse({ success: true, data: updated });
+        const index = d.settings.findIndex((s) => s.userId === userId);
+        if (index === -1) d.settings.push(next);
+        else d.settings[index] = next;
+        return next;
+      });
+      return successResponse(updated);
     }
   }
 
-  // 9. Sync Client Records into Server DB
+  // 9. One-shot import of a client's legacy local records
   if (path === "/api/sync" && method === "POST") {
-    const payload = (await request.json().catch(() => ({}))) as {
+    const payload = (await readJson(request)) as {
       vehicles?: VehicleRecord[];
       trips?: TripRecord[];
       settings?: Partial<SettingsRecord>;
     };
 
-    let importedVehicles = 0;
-    let importedTrips = 0;
+    const counts = await withDatabase((d) => {
+      let importedVehicles = 0;
+      let importedTrips = 0;
 
-    if (Array.isArray(payload.vehicles)) {
-      for (const v of payload.vehicles) {
-        const match = db.vehicles.find(
-          (ev) =>
-            ev.userId === userId &&
-            (ev._id === v._id ||
-              (ev.vehicleNumber && v.vehicleNumber && ev.vehicleNumber === v.vehicleNumber)),
-        );
-        if (!match) {
-          db.vehicles.push({
-            ...v,
+      if (Array.isArray(payload.vehicles)) {
+        for (const v of payload.vehicles.slice(0, 5000)) {
+          const match = d.vehicles.find(
+            (ev) =>
+              ev.userId === userId &&
+              (ev._id === v._id ||
+                (ev.vehicleNumber && v.vehicleNumber && ev.vehicleNumber === v.vehicleNumber)),
+          );
+          if (match) continue;
+          d.vehicles.push({
             _id: v._id || `veh_${crypto.randomUUID()}`,
             userId,
+            name: cleanString(v.name),
+            type: cleanString(v.type) || "Truck",
+            model: cleanString(v.model),
+            vehicleNumber: cleanString(v.vehicleNumber),
+            notes: cleanString(v.notes, NOTES_MAX),
             isActive: v.isActive ?? true,
             createdAt: v.createdAt || new Date().toISOString(),
             updatedAt: new Date().toISOString(),
@@ -511,61 +1102,106 @@ export async function handleApiFetch(request: Request): Promise<Response> {
           importedVehicles++;
         }
       }
-    }
 
-    if (Array.isArray(payload.trips)) {
-      for (const t of payload.trips) {
-        const match = db.trips.find(
-          (et) =>
-            et.userId === userId &&
-            (et._id === t._id ||
-              (et.vehicleId === t.vehicleId && et.date === t.date && et.income === t.income)),
-        );
-        if (!match) {
-          db.trips.push({
-            ...t,
+      if (Array.isArray(payload.trips)) {
+        for (const t of payload.trips.slice(0, 20000)) {
+          const match = d.trips.find(
+            (et) =>
+              et.userId === userId &&
+              (et._id === t._id ||
+                (et.vehicleId === t.vehicleId && et.date === t.date && et.income === t.income)),
+          );
+          if (match) continue;
+          const items = normalizeExpenseItems(t.otherExpenseItems);
+          d.trips.push({
             _id: t._id || `trp_${crypto.randomUUID()}`,
             userId,
+            vehicleId: cleanString(t.vehicleId),
+            date: DATE_RE.test(String(t.date || ""))
+              ? String(t.date)
+              : new Date().toISOString().slice(0, 10),
+            income: toAmount(t.income),
+            diesel: toAmount(t.diesel),
+            driverPayment: toAmount(t.driverPayment),
+            emiShare: toAmount(t.emiShare),
+            otherExpenseItems: items,
+            otherExpenses: sumItems(items),
+            notes: cleanString(t.notes, NOTES_MAX),
             createdAt: t.createdAt || new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           });
           importedTrips++;
         }
       }
-    }
 
-    if (payload.settings) {
-      const sIndex = db.settings.findIndex((s) => s.userId === userId);
-      const current = db.settings[sIndex] || {
-        _id: `set_${userId}`,
-        userId,
-        appName: "Vehicle Calculation System",
-        transportationName: "",
-        currency: "INR",
-        defaultVehicleId: null,
-        fullName: authUser.fullName,
-        mobileNumber: authUser.mobile,
-        businessName: "",
-        address: "",
-        contactNumber: authUser.mobile,
-        businessEmail: authUser.email,
-        updatedAt: new Date().toISOString(),
-      };
-      const merged = { ...current, ...payload.settings, updatedAt: new Date().toISOString() };
-      if (sIndex === -1) db.settings.push(merged);
-      else db.settings[sIndex] = merged;
-    }
+      if (payload.settings) {
+        // Allowlisted fields only — a client cannot inject arbitrary keys.
+        const s = payload.settings;
+        const index = d.settings.findIndex((x) => x.userId === userId);
+        const current = index === -1 ? undefined : d.settings[index];
+        const unifiedName = cleanString(
+          s.transportationName || s.businessName || s.appName || current?.appName,
+          NAME_MAX,
+        );
+        const next: SettingsRecord = {
+          _id: current?._id || `set_${userId}`,
+          userId,
+          appName: unifiedName || current?.appName || "Vehicle Calculation System",
+          transportationName: unifiedName || current?.transportationName || "",
+          businessName: unifiedName || current?.businessName || "",
+          currency: cleanString(s.currency, 10) || current?.currency || "INR",
+          defaultVehicleId: s.defaultVehicleId ?? current?.defaultVehicleId ?? null,
+          fullName: cleanString(s.fullName ?? current?.fullName ?? authUser.fullName, NAME_MAX),
+          mobileNumber: cleanString(s.mobileNumber ?? current?.mobileNumber ?? authUser.mobile, 20),
+          address: cleanString(s.address ?? current?.address ?? "", 500),
+          contactNumber: cleanString(
+            s.contactNumber ?? current?.contactNumber ?? authUser.mobile,
+            20,
+          ),
+          businessEmail: normalizeEmail(
+            s.businessEmail ?? current?.businessEmail ?? authUser.email,
+          ),
+          updatedAt: new Date().toISOString(),
+        };
+        if (index === -1) d.settings.push(next);
+        else d.settings[index] = next;
+      }
 
-    saveDatabase(db);
-    return jsonResponse({ success: true, data: { importedVehicles, importedTrips } });
+      return { importedVehicles, importedTrips };
+    });
+
+    return successResponse(counts);
   }
 
   return errorResponse("Not found", 404);
 }
 
+function normalizeExpenseItems(raw: unknown): OtherExpenseItem[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .slice(0, 100)
+    .map((i) => {
+      const item = i as { name?: unknown; amount?: unknown };
+      return { name: cleanString(item?.name), amount: toAmount(item?.amount) };
+    })
+    .filter((i) => i.name.length > 0 || i.amount > 0);
+}
+
+function sumItems(items: OtherExpenseItem[]): number {
+  return items.reduce((sum, i) => sum + i.amount, 0);
+}
+
 export async function handleApiNode(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const chunks: Buffer[] = [];
-  req.on("data", (chunk: Buffer) => chunks.push(chunk));
+  let total = 0;
+  req.on("data", (chunk: Buffer) => {
+    total += chunk.length;
+    if (total > 2 * 1024 * 1024) {
+      req.destroy();
+      return;
+    }
+    chunks.push(chunk);
+  });
   req.on("end", async () => {
     try {
       const body = Buffer.concat(chunks);
@@ -578,10 +1214,11 @@ export async function handleApiNode(req: IncomingMessage, res: ServerResponse): 
         }
       }
 
+      const isGetOrHead = ["GET", "HEAD"].includes((req.method || "").toUpperCase());
       const webRequest = new Request(url, {
-        method: req.method,
+        method: req.method || "GET",
         headers,
-        body: ["GET", "HEAD"].includes((req.method || "").toUpperCase()) ? undefined : body,
+        ...(isGetOrHead ? {} : { body }),
       });
 
       const response = await handleApiFetch(webRequest);

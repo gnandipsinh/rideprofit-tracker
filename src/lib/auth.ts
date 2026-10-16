@@ -45,6 +45,12 @@ export const resetSchema = z
     message: "Passwords do not match",
   });
 
+/** 6-digit verification code sent by email (login or password reset). */
+export const codeSchema = z
+  .string()
+  .trim()
+  .regex(/^\d{6}$/, "Enter the 6-digit code");
+
 /** Generic messages only — never leak whether an account exists or why auth failed. */
 export const GENERIC_CREDENTIALS_ERROR = "Incorrect email or password. Please try again.";
 export const GENERIC_ERROR = "Something went wrong. Please try again in a moment.";
@@ -63,17 +69,15 @@ export function safeAuthMessage(raw: string | undefined, fallback = GENERIC_ERRO
   return fallback;
 }
 
-export async function sendLoginLink(email: string) {
-  return supabase.auth.signInWithOtp({
-    email,
-    options: { shouldCreateUser: false, emailRedirectTo: `${window.location.origin}/auth` },
-  });
+/** Sends a 6-digit login code to a registered email address. */
+export async function sendLoginCode(email: string) {
+  return supabase.auth.signInWithOtp({ email });
 }
 
-export async function resendSignupEmail(email: string) {
-  return supabase.auth.resend({ type: "signup", email });
-}
-
+/**
+ * Sends a 6-digit password-reset code. The response never reveals whether an
+ * account exists for the given address.
+ */
 export async function sendRecoveryEmail(email: string) {
   return supabase.auth.resetPasswordForEmail(email, {
     redirectTo: `${window.location.origin}/auth`,
