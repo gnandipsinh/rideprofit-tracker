@@ -137,7 +137,10 @@ function RootComponent() {
     const { data } = supabase.auth.onAuthStateChange((event: string) => {
       if (event !== "SIGNED_IN" && event !== "SIGNED_OUT" && event !== "USER_UPDATED") return;
       void router.invalidate();
-      if (event === "SIGNED_OUT") queryClient.clear();
+      // Wipe cached account data on every sign-in as well as sign-out: keys like
+      // ["settings"] are not user-scoped, so without this a newly registered
+      // account could briefly display the previous account's cached profile.
+      if (event === "SIGNED_OUT" || event === "SIGNED_IN") queryClient.clear();
       else void queryClient.invalidateQueries();
     });
     return () => data.subscription.unsubscribe();

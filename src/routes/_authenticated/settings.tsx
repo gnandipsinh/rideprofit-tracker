@@ -33,13 +33,13 @@ export const Route = createFileRoute("/_authenticated/settings")({
   ssr: false,
   head: () => ({
     meta: [
-      { title: "Settings — Jay Mataji Transport" },
+      { title: "Settings — Vehicle Calculation System" },
       {
         name: "description",
         content:
           "Manage your profile, change your password and configure your transport business details.",
       },
-      { property: "og:title", content: "Settings — Jay Mataji Transport" },
+      { property: "og:title", content: "Settings — Vehicle Calculation System" },
       {
         property: "og:description",
         content: "Manage your profile, change your password and business details.",
@@ -69,10 +69,13 @@ function SettingsPage() {
   const [confirmNewPassword, setConfirmNewPassword] = useState("");
   const [showPasswords, setShowPasswords] = useState(false);
   const [passwordBusy, setPasswordBusy] = useState(false);
-  const [hydrated, setHydrated] = useState(false);
+  const [hydratedFor, setHydratedFor] = useState("");
 
   useEffect(() => {
-    if (!settings || hydrated) return;
+    // Hydrate per settings record (_id is `set_<userId>`): if the cached record
+    // belongs to a different account than the one shown now, re-hydrate with
+    // this account's values so another account's profile can never stick here.
+    if (!settings || hydratedFor === settings._id) return;
     const initialName =
       settings.transportationName || settings.businessName || settings.appName || "";
     setTransportName(initialName);
@@ -83,8 +86,8 @@ function SettingsPage() {
     setAddress(settings.address || "");
     setContactNumber(settings.contactNumber || "");
     setBusinessEmail(settings.businessEmail || "");
-    setHydrated(true);
-  }, [settings, hydrated]);
+    setHydratedFor(settings._id);
+  }, [settings, hydratedFor]);
 
   useEffect(() => {
     void supabase.auth
@@ -123,7 +126,7 @@ function SettingsPage() {
         setBusinessEmail(saved.businessEmail || payload.businessEmail);
         setCurrency(saved.currency || payload.currency);
         setDefaultVehicleId(saved.defaultVehicleId || payload.defaultVehicleId || NO_DEFAULT);
-        setHydrated(true);
+        setHydratedFor(saved._id || hydratedFor);
       },
     });
   };
@@ -221,6 +224,7 @@ function SettingsPage() {
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                   className="h-12 rounded-xl bg-secondary/60 text-base"
+                  placeholder="Enter your full name"
                 />
               </div>
               <div className="space-y-2">
@@ -249,6 +253,7 @@ function SettingsPage() {
                   value={mobileNumber}
                   onChange={(e) => setMobileNumber(e.target.value)}
                   className="h-12 rounded-xl bg-secondary/60 text-base"
+                  placeholder="Enter mobile number"
                 />
               </div>
             </div>
@@ -274,7 +279,7 @@ function SettingsPage() {
                   value={transportName}
                   onChange={(e) => setTransportName(e.target.value)}
                   className="h-12 rounded-xl bg-secondary/60 text-base"
-                  placeholder="e.g. Jay Mataji Transport"
+                  placeholder="Enter transport name"
                 />
                 <p className="text-[0.7rem] text-muted-foreground">
                   Unified company name displayed across the app, reports, and bills.
@@ -293,6 +298,7 @@ function SettingsPage() {
                   value={businessEmail}
                   onChange={(e) => setBusinessEmail(e.target.value)}
                   className="h-12 rounded-xl bg-secondary/60 text-base"
+                  placeholder="Enter business email"
                 />
               </div>
               <div className="space-y-2 sm:col-span-2">
@@ -307,6 +313,7 @@ function SettingsPage() {
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
                   className="h-12 rounded-xl bg-secondary/60 text-base"
+                  placeholder="Enter address"
                 />
               </div>
               <div className="space-y-2">
@@ -321,6 +328,7 @@ function SettingsPage() {
                   value={contactNumber}
                   onChange={(e) => setContactNumber(e.target.value)}
                   className="h-12 rounded-xl bg-secondary/60 text-base"
+                  placeholder="Enter contact number"
                 />
               </div>
               <div className="space-y-2">

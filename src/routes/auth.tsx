@@ -36,15 +36,15 @@ export const Route = createFileRoute("/auth")({
   ssr: false,
   head: () => ({
     meta: [
-      { title: "Jay Mataji Transport — Fleet Accounting" },
+      { title: "Vehicle Calculation System — Fleet Accounting" },
       {
         name: "description",
         content: "Sign in to access your fleet accounting dashboard.",
       },
-      { property: "og:title", content: "Jay Mataji Transport — Fleet Accounting" },
+      { property: "og:title", content: "Vehicle Calculation System — Fleet Accounting" },
       {
         property: "og:description",
-        content: "Secure fleet accounting for Jay Mataji Transport.",
+        content: "Secure fleet accounting for your transport business.",
       },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
@@ -147,7 +147,7 @@ function Field({
   );
 }
 
-export default function AuthPage() {
+function AuthPage() {
   const navigate = useNavigate();
 
   const [step, setStep] = useState<Step>("login");
@@ -239,7 +239,7 @@ export default function AuthPage() {
       succeeded = true;
       setPassword("");
       setConfirmPassword("");
-      toast.success("Account created successfully! Welcome to Jay Mataji Transport.");
+      toast.success("Account created successfully!");
       // Navigation happens in the SIGNED_IN subscriber (outside this try/catch),
       // so a router redirect can never be misreported as an error here.
     } catch {
@@ -483,7 +483,7 @@ export default function AuthPage() {
             <Truck className="h-7 w-7" />
           </div>
           <h1 className="mt-4 text-2xl font-extrabold tracking-tight sm:text-3xl">
-            Jay Mataji Transport
+            Vehicle Calculation System
           </h1>
           <p className="mt-1 text-[0.65rem] font-bold uppercase tracking-[0.3em] text-primary/85">
             Fleet Accounting

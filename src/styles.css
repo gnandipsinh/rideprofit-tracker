@@ -5,7 +5,7 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * Design system — Jay Mataji Transport Fleet Accounting.
+ * Design system — Vehicle Calculation System Fleet Accounting.
  * Premium dark luxury interface with gold accents.
  * All colors are explicit hex values; never hardcode colors in components.
  */
@@ -68,7 +68,7 @@
 :root {
   --radius: 1rem;
 
-  /* Core brand colors - Jay Mataji Transport */
+  /* Core brand colors - Vehicle Calculation System */
   --background: #02070d;
   --foreground: #f6fbff;
 

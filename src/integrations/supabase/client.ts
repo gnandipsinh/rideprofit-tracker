@@ -468,6 +468,17 @@ function createProductionAuth() {
         /* network failure must not block local sign-out */
       }
       saveActiveSession(null);
+      // This browser's pending password-reset context (email + code) belongs to
+      // the account that created it — drop it at the account boundary so the
+      // next signed-in account can never inherit it.
+      if (typeof window !== "undefined") {
+        try {
+          window.localStorage.removeItem(RESET_STORAGE_KEY);
+          saveResetToken("");
+        } catch {
+          /* storage unavailable */
+        }
+      }
       notifySubscribers("SIGNED_OUT", null);
       return { error: null };
     },

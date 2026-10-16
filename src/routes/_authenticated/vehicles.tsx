@@ -39,13 +39,13 @@ export const Route = createFileRoute("/_authenticated/vehicles")({
   ssr: false,
   head: () => ({
     meta: [
-      { title: "Vehicles — Jay Mataji Transport" },
+      { title: "Vehicles — Vehicle Calculation System" },
       {
         name: "description",
         content:
           "Add, edit and remove vehicles. Every vehicle keeps its own trips, expenses and profit reports.",
       },
-      { property: "og:title", content: "Vehicles — Jay Mataji Transport" },
+      { property: "og:title", content: "Vehicles — Vehicle Calculation System" },
       {
         property: "og:description",
         content: "Manage your fleet and keep trip accounting separated per vehicle.",

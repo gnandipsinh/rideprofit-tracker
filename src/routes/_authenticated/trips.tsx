@@ -30,13 +30,13 @@ export const Route = createFileRoute("/_authenticated/trips")({
   ssr: false,
   head: () => ({
     meta: [
-      { title: "Trips — Jay Mataji Transport" },
+      { title: "Trips — Vehicle Calculation System" },
       {
         name: "description",
         content:
           "Record daily trips with income, diesel, editable driver payment, multiple other expenses and EMI share.",
       },
-      { property: "og:title", content: "Trips — Jay Mataji Transport" },
+      { property: "og:title", content: "Trips — Vehicle Calculation System" },
       {
         property: "og:description",
         content: "Add and edit daily trips with automatic profit calculation.",

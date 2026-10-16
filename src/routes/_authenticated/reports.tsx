@@ -78,7 +78,7 @@ export const Route = createFileRoute("/_authenticated/reports")({
   component: ReportsPage,
 });
 
-export function ReportsPage() {
+function ReportsPage() {
   const {
     symbol,
     appName,

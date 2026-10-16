@@ -39,13 +39,13 @@ export const Route = createFileRoute("/_authenticated/")({
   ssr: false,
   head: () => ({
     meta: [
-      { title: "Dashboard — Jay Mataji Transport" },
+      { title: "Dashboard — Vehicle Calculation System" },
       {
         name: "description",
         content:
           "Vehicle-wise trip accounting dashboard: track daily income, diesel, driver payments, EMI share and net profit.",
       },
-      { property: "og:title", content: "Dashboard — Jay Mataji Transport" },
+      { property: "og:title", content: "Dashboard — Vehicle Calculation System" },
       {
         property: "og:description",
         content: "Track daily trip income, expenses and profit for every vehicle in your fleet.",

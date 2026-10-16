@@ -996,21 +996,24 @@ export async function handleApiFetch(request: Request): Promise<Response> {
       const created = await withDatabase((d) => {
         const found = d.settings.find((s) => s.userId === userId);
         if (found) return found;
+        // A genuinely new account starts with a CLEAN profile. No full name,
+        // mobile, transport/business name, business email or address is ever
+        // derived from the registration record, from another account, or from
+        // any hardcoded personal default — the registered email lives on the
+        // user record for authentication only.
         const settings: SettingsRecord = {
           _id: `set_${userId}`,
           userId,
-          appName: authUser.fullName
-            ? `${authUser.fullName}'s Fleet`
-            : "Vehicle Calculation System",
-          transportationName: authUser.fullName ? `${authUser.fullName}'s Transport` : "",
+          appName: "",
+          transportationName: "",
           currency: "INR",
           defaultVehicleId: null,
-          fullName: authUser.fullName || "",
-          mobileNumber: authUser.mobile || "",
-          businessName: authUser.fullName ? `${authUser.fullName} Logistics` : "",
+          fullName: "",
+          mobileNumber: "",
+          businessName: "",
           address: "",
-          contactNumber: authUser.mobile || "",
-          businessEmail: authUser.email || "",
+          contactNumber: "",
+          businessEmail: "",
           updatedAt: new Date().toISOString(),
         };
         d.settings.push(settings);
@@ -1041,19 +1044,14 @@ export async function handleApiFetch(request: Request): Promise<Response> {
           businessName: unifiedName,
           currency: cleanString(body.currency, 10) || current?.currency || "INR",
           defaultVehicleId: body.defaultVehicleId ?? current?.defaultVehicleId ?? null,
-          fullName: cleanString(body.fullName ?? current?.fullName ?? authUser.fullName, NAME_MAX),
-          mobileNumber: cleanString(
-            body.mobileNumber ?? current?.mobileNumber ?? authUser.mobile,
-            20,
-          ),
+          // Missing fields resolve to this account's own saved value first and
+          // only then to an empty default — never to registration data or to
+          // another account's profile.
+          fullName: cleanString(body.fullName ?? current?.fullName ?? "", NAME_MAX),
+          mobileNumber: cleanString(body.mobileNumber ?? current?.mobileNumber ?? "", 20),
           address: cleanString(body.address ?? current?.address ?? "", 500),
-          contactNumber: cleanString(
-            body.contactNumber ?? current?.contactNumber ?? authUser.mobile,
-            20,
-          ),
-          businessEmail: normalizeEmail(
-            body.businessEmail ?? current?.businessEmail ?? authUser.email,
-          ),
+          contactNumber: cleanString(body.contactNumber ?? current?.contactNumber ?? "", 20),
+          businessEmail: normalizeEmail(body.businessEmail ?? current?.businessEmail ?? ""),
           updatedAt: new Date().toISOString(),
         };
 
@@ -1151,16 +1149,11 @@ export async function handleApiFetch(request: Request): Promise<Response> {
           businessName: unifiedName || current?.businessName || "",
           currency: cleanString(s.currency, 10) || current?.currency || "INR",
           defaultVehicleId: s.defaultVehicleId ?? current?.defaultVehicleId ?? null,
-          fullName: cleanString(s.fullName ?? current?.fullName ?? authUser.fullName, NAME_MAX),
-          mobileNumber: cleanString(s.mobileNumber ?? current?.mobileNumber ?? authUser.mobile, 20),
+          fullName: cleanString(s.fullName ?? current?.fullName ?? "", NAME_MAX),
+          mobileNumber: cleanString(s.mobileNumber ?? current?.mobileNumber ?? "", 20),
           address: cleanString(s.address ?? current?.address ?? "", 500),
-          contactNumber: cleanString(
-            s.contactNumber ?? current?.contactNumber ?? authUser.mobile,
-            20,
-          ),
-          businessEmail: normalizeEmail(
-            s.businessEmail ?? current?.businessEmail ?? authUser.email,
-          ),
+          contactNumber: cleanString(s.contactNumber ?? current?.contactNumber ?? "", 20),
+          businessEmail: normalizeEmail(s.businessEmail ?? current?.businessEmail ?? ""),
           updatedAt: new Date().toISOString(),
         };
         if (index === -1) d.settings.push(next);

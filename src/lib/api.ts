@@ -365,9 +365,12 @@ export const api = {
     const user = await getAuthenticatedUser();
     if (!user) throw new ApiError("Authentication required", 401);
 
-    const unifiedName =
-      sanitizeString(payload.transportationName || payload.businessName || payload.appName) ||
-      "Jay Mataji Transport";
+    // No hardcoded business default: an empty name is resolved server-side
+    // against THIS account's own saved value (then a generic app label), so a
+    // new account can never inherit another account's transport name.
+    const unifiedName = sanitizeString(
+      payload.transportationName || payload.businessName || payload.appName,
+    );
 
     const updated = await requestBackend<AppSettings>("/api/settings", {
       method: "PUT",
