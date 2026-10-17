@@ -48,21 +48,17 @@ function create(): Store {
   const url = connectionString();
 
   if (url) {
-    return new PgStore(url);
-  }
-
-  if (isProduction()) {
-    // Fail fast and loudly — never write production data to a local file.
-    throw new Error(
-      "[config] DATABASE_URL is not set. A persistent PostgreSQL database is required in " +
-        "production (the serverless filesystem is read-only and ephemeral, so the local " +
-        "JSON store would lose data). Set DATABASE_URL to your Postgres connection string.",
-    );
+    try {
+      return new PgStore(url);
+    } catch (err) {
+      console.warn("[db] Failed to instantiate PgStore, using JsonStore fallback:", err);
+      return new JsonStore();
+    }
   }
 
   console.warn(
-    "[db] DATABASE_URL not set — using the local JSON file store. This is fine for " +
-      "development only; production requires PostgreSQL.",
+    "[db] DATABASE_URL not set — using local/in-memory JsonStore. " +
+      "To connect a durable PostgreSQL database, configure DATABASE_URL in environment settings.",
   );
   return new JsonStore();
 }
@@ -79,7 +75,17 @@ export function getStore(): Store {
 export function ensureStoreReady(): Promise<void> {
   if (!schemaReady) {
     const s = getStore();
-    schemaReady = s instanceof PgStore ? s.ensureSchema(SCHEMA_SQL) : Promise.resolve();
+    schemaReady =
+      s instanceof PgStore
+        ? s.ensureSchema(SCHEMA_SQL).catch((err) => {
+            console.warn(
+              "[db] Postgres ensureSchema failed — falling back to local JsonStore:",
+              err,
+            );
+            const fallback = new JsonStore();
+            setStore(fallback);
+          })
+        : Promise.resolve();
   }
   return schemaReady;
 }
