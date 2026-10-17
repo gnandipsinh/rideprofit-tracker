@@ -26,6 +26,7 @@ const pg = new EmbeddedPostgres({
   password: PASSWORD,
   port: PORT,
   persistent: false,
+  createPostgresUser: true,
 });
 
 async function main() {

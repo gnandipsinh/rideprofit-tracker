@@ -54,6 +54,7 @@ import {
 } from "@/lib/format";
 import { REPORT_PRESETS, reportRange, type ReportPreset } from "@/lib/date-ranges";
 import { ALL_VEHICLES, type OtherExpenseItem, type ReportRow } from "@/lib/types";
+import { roundCurrency } from "@/lib/calc";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -147,13 +148,13 @@ function ReportsPage() {
     const summary = rows.reduce(
       (acc, r) => ({
         trips: acc.trips + 1,
-        income: acc.income + r.income,
-        diesel: acc.diesel + r.diesel,
-        driverPayment: acc.driverPayment + r.driverPayment,
-        otherExpenses: acc.otherExpenses + r.otherExpenses,
-        emiShare: acc.emiShare + r.emiShare,
-        totalExpense: acc.totalExpense + r.totalExpense,
-        profit: acc.profit + r.profit,
+        income: roundCurrency(acc.income + r.income),
+        diesel: roundCurrency(acc.diesel + r.diesel),
+        driverPayment: roundCurrency(acc.driverPayment + r.driverPayment),
+        otherExpenses: roundCurrency(acc.otherExpenses + r.otherExpenses),
+        emiShare: roundCurrency(acc.emiShare + r.emiShare),
+        totalExpense: roundCurrency(acc.totalExpense + r.totalExpense),
+        profit: roundCurrency(acc.profit + r.profit),
       }),
       {
         trips: 0,

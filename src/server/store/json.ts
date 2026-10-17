@@ -179,35 +179,111 @@ export class JsonStore implements Store {
   }
 
   /* ---------------------------------------------------------------- */
-  /* Sessions — in-memory revocation ledger (development only).        */
+  /* Sessions — file-persisted revocation ledger (development only).   */
   /* ---------------------------------------------------------------- */
 
-  private sessions = new Map<
+  private sessions: Map<
     string,
     { userId: string; expiresAt: number; revokedAt: number | null }
-  >();
+  > | null = null;
+
+  private loadSessions(): Map<
+    string,
+    { userId: string; expiresAt: number; revokedAt: number | null }
+  > {
+    if (this.sessions) return this.sessions;
+    this.sessions = new Map();
+    ensureDataDir();
+    const sessionsFile = path.join(DATA_DIR, "sessions.json");
+    try {
+      if (fs.existsSync(sessionsFile)) {
+        const raw = fs.readFileSync(sessionsFile, "utf8");
+        const list = JSON.parse(raw);
+        if (Array.isArray(list)) {
+          const now = Math.floor(Date.now() / 1000);
+          for (const s of list) {
+            if (s && typeof s.tokenHash === "string" && s.expiresAt > now) {
+              this.sessions.set(s.tokenHash, {
+                userId: String(s.userId),
+                expiresAt: Number(s.expiresAt),
+                revokedAt: s.revokedAt ? Number(s.revokedAt) : null,
+              });
+            }
+          }
+        }
+      }
+    } catch {
+      /* ignore file parse errors */
+    }
+    return this.sessions;
+  }
+
+  private persistSessions(): void {
+    if (!this.sessions) return;
+    ensureDataDir();
+    const sessionsFile = path.join(DATA_DIR, "sessions.json");
+    try {
+      const now = Math.floor(Date.now() / 1000);
+      const list: Array<{
+        tokenHash: string;
+        userId: string;
+        expiresAt: number;
+        revokedAt: number | null;
+      }> = [];
+      for (const [tokenHash, s] of this.sessions.entries()) {
+        if (s.expiresAt > now) {
+          list.push({ tokenHash, ...s });
+        }
+      }
+      fs.writeFileSync(sessionsFile, JSON.stringify(list, null, 2), "utf8");
+    } catch (e) {
+      console.error("[db] error saving sessions.json:", e);
+    }
+  }
 
   async createSession(tokenHash: string, userId: string, expiresAt: number): Promise<void> {
-    this.sessions.set(tokenHash, { userId, expiresAt, revokedAt: null });
+    const map = this.loadSessions();
+    map.set(tokenHash, { userId, expiresAt, revokedAt: null });
+    this.persistSessions();
   }
 
   async isSessionActive(tokenHash: string): Promise<boolean> {
-    const s = this.sessions.get(tokenHash);
+    const map = this.loadSessions();
+    const s = map.get(tokenHash);
     if (!s) return false;
     if (s.revokedAt !== null) return false;
     return s.expiresAt > Math.floor(Date.now() / 1000);
   }
 
   async revokeSession(tokenHash: string): Promise<void> {
-    const s = this.sessions.get(tokenHash);
-    if (s) s.revokedAt = Date.now();
+    const map = this.loadSessions();
+    const s = map.get(tokenHash);
+    if (s) {
+      s.revokedAt = Date.now();
+      this.persistSessions();
+    }
   }
 
   async revokeAllSessions(userId: string): Promise<void> {
+    const map = this.loadSessions();
     const now = Date.now();
-    for (const s of this.sessions.values()) {
-      if (s.userId === userId) s.revokedAt = now;
+    let changed = false;
+    for (const s of map.values()) {
+      if (s.userId === userId && s.revokedAt === null) {
+        s.revokedAt = now;
+        changed = true;
+      }
     }
+    if (changed) this.persistSessions();
+  }
+
+  async getUser(id: string): Promise<UserRecord | null> {
+    const db = await this.load();
+    return db.users.find((u) => u.id === id) ?? null;
+  }
+
+  async ping(): Promise<{ ok: boolean; message?: string }> {
+    return { ok: true, message: "Local JSON file store operational (dev-only)" };
   }
 }
 

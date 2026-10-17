@@ -25,6 +25,7 @@ const pg = new EmbeddedPostgres({
   password: "ridepw_local_only",
   port: PORT,
   persistent: false,
+  createPostgresUser: true,
 });
 const url = `postgres://ride:ridepw_local_only@127.0.0.1:${PORT}/${DB}`;
 

@@ -140,6 +140,10 @@ export interface Store {
   revokeSession(tokenHash: string): Promise<void>;
   /** Revokes every token for a user (password change / reset). */
   revokeAllSessions(userId: string): Promise<void>;
+  /** Fetch a single user by ID without loading the entire database schema. */
+  getUser(id: string): Promise<UserRecord | null>;
+  /** Real database connectivity health check (SELECT 1 on Postgres). */
+  ping(): Promise<{ ok: boolean; message?: string }>;
   /** Releases any open resources (connection pool). Safe to call twice. */
   close(): Promise<void>;
 }

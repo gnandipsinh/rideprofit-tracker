@@ -113,6 +113,7 @@ export function TripFormDialog({ open, onOpenChange, trip }: TripFormDialogProps
     }));
 
   const submit = () => {
+    if (saveTrip.isPending) return;
     if (!form.vehicleId) {
       toast.error("Please select a vehicle");
       return;

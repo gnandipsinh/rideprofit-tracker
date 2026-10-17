@@ -29,7 +29,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useApp } from "@/lib/app-context";
 import { useTrips } from "@/lib/queries";
-import { aggregate, profitOf } from "@/lib/calc";
+import { aggregate, profitOf, roundCurrency, totalExpenseOf } from "@/lib/calc";
 import { formatDateShort, formatIndianNumber, formatMoney, isoDayOnly } from "@/lib/format";
 import { DASHBOARD_PRESETS, dashboardRange, type DashboardPreset } from "@/lib/date-ranges";
 import { todayInput } from "@/lib/format";
@@ -114,11 +114,12 @@ function Dashboard() {
     >();
     trips.forEach((t) => {
       const day = isoDayOnly(t.date);
-      const expense = t.diesel + t.driverPayment + t.otherExpenses + t.emiShare;
+      const expense = totalExpenseOf(t);
+      const profit = profitOf(t);
       const entry = byDay.get(day) ?? { day, income: 0, expense: 0, profit: 0 };
-      entry.income += t.income;
-      entry.expense += expense;
-      entry.profit += t.income - expense;
+      entry.income = roundCurrency(entry.income + (Number(t.income) || 0));
+      entry.expense = roundCurrency(entry.expense + expense);
+      entry.profit = roundCurrency(entry.profit + profit);
       byDay.set(day, entry);
     });
     return [...byDay.values()]

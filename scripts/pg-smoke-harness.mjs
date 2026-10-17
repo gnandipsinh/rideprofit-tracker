@@ -23,6 +23,7 @@ const pg = new EmbeddedPostgres({
   password: PASSWORD,
   port: PORT,
   persistent: false,
+  createPostgresUser: true,
 });
 
 const url = `postgres://${USER}:${PASSWORD}@127.0.0.1:${PORT}/${DB}`;

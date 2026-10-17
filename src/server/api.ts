@@ -49,6 +49,22 @@ function isValidEmail(email: string): boolean {
   return email.length > 0 && email.length <= EMAIL_MAX && EMAIL_RE.test(email);
 }
 
+/** Validates that dateStr is an actual calendar date (e.g. rejects 2026-02-31). */
+function isValidCalendarDate(dateStr: unknown): boolean {
+  if (typeof dateStr !== "string" || !DATE_RE.test(dateStr)) return false;
+  const parts = dateStr.split("-");
+  const year = parseInt(parts[0] || "", 10);
+  const month = parseInt(parts[1] || "", 10);
+  const day = parseInt(parts[2] || "", 10);
+  if (year < 1970 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31) {
+    return false;
+  }
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+  );
+}
+
 /** Returns an error message, or null when the password is acceptable. */
 function validatePassword(pw: unknown): string | null {
   if (typeof pw !== "string" || pw.length === 0) return "Password is required.";
@@ -66,7 +82,7 @@ function cleanString(value: unknown, max = TEXT_MAX): string {
 function toAmount(value: unknown): number {
   const n = Number(value);
   if (!Number.isFinite(n) || n < 0) return 0;
-  return Math.min(n, 1_000_000_000);
+  return Math.round(Math.min(n, 1_000_000_000) * 100) / 100;
 }
 
 // ---------------------------------------------------------------------------
@@ -144,7 +160,7 @@ const TOKEN_SECRET_MIN = 32;
 function getTokenSecret(): string {
   if (cachedSecret) return cachedSecret;
 
-  const envSecret = process.env["TOKEN_SECRET"] || process.env["VITE_TOKEN_SECRET"];
+  const envSecret = process.env["TOKEN_SECRET"];
 
   if (isProductionServer()) {
     // Production must never fall back to a generated per-instance secret: on a
@@ -156,6 +172,16 @@ function getTokenSecret(): string {
         `[config] TOKEN_SECRET must be set to at least ${TOKEN_SECRET_MIN} characters in production. ` +
           "Generate one with: node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\" " +
           "Set it in your deployment environment (never commit it).",
+      );
+    }
+    const lower = envSecret.toLowerCase();
+    if (
+      lower.includes("placeholder") ||
+      lower.includes("your-token-secret") ||
+      lower.includes("change-me")
+    ) {
+      throw new Error(
+        "[config] Insecure TOKEN_SECRET placeholder detected in production. Configure a strong random secret.",
       );
     }
     cachedSecret = envSecret;
@@ -175,49 +201,124 @@ function getTokenSecret(): string {
   return cachedSecret;
 }
 
-function signToken(userId: string, purpose: TokenPurpose, ttlSeconds: number): string {
-  const expiresAt = Math.floor(Date.now() / 1000) + ttlSeconds;
-  const payload = `${userId}:${purpose}:${expiresAt}`;
-  const hmac = crypto
+function base64UrlEncode(data: string | Buffer): string {
+  const buf = typeof data === "string" ? Buffer.from(data, "utf8") : data;
+  return buf.toString("base64url");
+}
+
+function base64UrlDecode(str: string): string {
+  return Buffer.from(str, "base64url").toString("utf8");
+}
+
+function signJwt(userId: string, purpose: TokenPurpose, ttlSeconds: number): string {
+  const now = Math.floor(Date.now() / 1000);
+  const expiresAt = now + ttlSeconds;
+  const header = base64UrlEncode(JSON.stringify({ alg: "HS256", typ: "JWT" }));
+  const payload = base64UrlEncode(
+    JSON.stringify({
+      sub: userId,
+      userId,
+      purpose,
+      iat: now,
+      exp: expiresAt,
+    }),
+  );
+  const signature = crypto
     .createHmac("sha256", getTokenSecret())
-    .update(payload)
-    .digest("hex")
-    .slice(0, 32);
-  return `v1_${userId}_${purpose}_${expiresAt}_${hmac}`;
+    .update(`${header}.${payload}`)
+    .digest("base64url");
+  return `${header}.${payload}.${signature}`;
+}
+
+function verifyJwt(jwt: string, expectedPurpose: TokenPurpose): { userId: string; valid: boolean } {
+  const parts = jwt.split(".");
+  if (parts.length !== 3) return { userId: "", valid: false };
+  const [headerB64, payloadB64, signatureB64] = parts;
+  if (!headerB64 || !payloadB64 || !signatureB64) return { userId: "", valid: false };
+
+  try {
+    const header = JSON.parse(base64UrlDecode(headerB64)) as { alg?: string; typ?: string };
+    if (header.alg !== "HS256") return { userId: "", valid: false };
+  } catch {
+    return { userId: "", valid: false };
+  }
+
+  const expectedSignature = crypto
+    .createHmac("sha256", getTokenSecret())
+    .update(`${headerB64}.${payloadB64}`)
+    .digest("base64url");
+
+  if (signatureB64.length !== expectedSignature.length) return { userId: "", valid: false };
+  const sigMatch = crypto.timingSafeEqual(
+    Buffer.from(signatureB64),
+    Buffer.from(expectedSignature),
+  );
+  if (!sigMatch) return { userId: "", valid: false };
+
+  try {
+    const payload = JSON.parse(base64UrlDecode(payloadB64)) as {
+      sub?: string;
+      userId?: string;
+      purpose?: string;
+      exp?: number;
+    };
+    const now = Math.floor(Date.now() / 1000);
+    if (!payload.exp || now > payload.exp) return { userId: "", valid: false };
+    if (payload.purpose !== expectedPurpose) return { userId: "", valid: false };
+    const uid = payload.sub || payload.userId || "";
+    if (!uid) return { userId: "", valid: false };
+    return { userId: uid, valid: true };
+  } catch {
+    return { userId: "", valid: false };
+  }
+}
+
+function signToken(userId: string, purpose: TokenPurpose, ttlSeconds: number): string {
+  return signJwt(userId, purpose, ttlSeconds);
 }
 
 function verifyToken(token: string, purpose: TokenPurpose): { userId: string; valid: boolean } {
   const invalid = { userId: "", valid: false };
-  if (!token || !token.startsWith("v1_")) return invalid;
+  if (!token) return invalid;
 
-  const rest = token.slice(3);
-  const lastUnderscore = rest.lastIndexOf("_");
-  if (lastUnderscore < 1) return invalid;
+  // 1. Standard RFC 7519 JSON Web Token (header.payload.signature)
+  if (token.split(".").length === 3) {
+    return verifyJwt(token, purpose);
+  }
 
-  const hmac = rest.slice(lastUnderscore + 1);
-  const withoutHmac = rest.slice(0, lastUnderscore); // userId_purpose_expiresAt
-  const purposeSplit = withoutHmac.lastIndexOf("_");
-  if (purposeSplit < 1) return invalid;
+  // 2. Backward compatibility: v1_<userId>_<purpose>_<expiresAt>_<hmac>
+  if (token.startsWith("v1_")) {
+    const rest = token.slice(3);
+    const lastUnderscore = rest.lastIndexOf("_");
+    if (lastUnderscore < 1) return invalid;
 
-  const userIdEnd = withoutHmac.lastIndexOf("_", purposeSplit - 1);
-  if (userIdEnd < 1) return invalid;
+    const hmac = rest.slice(lastUnderscore + 1);
+    const withoutHmac = rest.slice(0, lastUnderscore); // userId_purpose_expiresAt
+    const purposeSplit = withoutHmac.lastIndexOf("_");
+    if (purposeSplit < 1) return invalid;
 
-  const userId = withoutHmac.slice(0, userIdEnd);
-  const tokenPurpose = withoutHmac.slice(userIdEnd + 1, purposeSplit);
-  const expiresAt = parseInt(withoutHmac.slice(purposeSplit + 1), 10);
+    const userIdEnd = withoutHmac.lastIndexOf("_", purposeSplit - 1);
+    if (userIdEnd < 1) return invalid;
 
-  if (!userId || tokenPurpose !== purpose || Number.isNaN(expiresAt)) return invalid;
-  if (Math.floor(Date.now() / 1000) > expiresAt) return invalid;
+    const userId = withoutHmac.slice(0, userIdEnd);
+    const tokenPurpose = withoutHmac.slice(userIdEnd + 1, purposeSplit);
+    const expiresAt = parseInt(withoutHmac.slice(purposeSplit + 1), 10);
 
-  const expected = crypto
-    .createHmac("sha256", getTokenSecret())
-    .update(`${userId}:${purpose}:${expiresAt}`)
-    .digest("hex")
-    .slice(0, 32);
+    if (!userId || tokenPurpose !== purpose || Number.isNaN(expiresAt)) return invalid;
+    if (Math.floor(Date.now() / 1000) > expiresAt) return invalid;
 
-  if (hmac.length !== expected.length) return invalid;
-  const valid = crypto.timingSafeEqual(Buffer.from(hmac), Buffer.from(expected));
-  return { userId: valid ? userId : "", valid };
+    const expected = crypto
+      .createHmac("sha256", getTokenSecret())
+      .update(`${userId}:${purpose}:${expiresAt}`)
+      .digest("hex")
+      .slice(0, 32);
+
+    if (hmac.length !== expected.length) return invalid;
+    const valid = crypto.timingSafeEqual(Buffer.from(hmac), Buffer.from(expected));
+    return { userId: valid ? userId : "", valid };
+  }
+
+  return invalid;
 }
 
 // ---------------------------------------------------------------------------
@@ -270,35 +371,59 @@ async function takeRateLimit(
   return (await readyStore()).takeRateLimit(key, max, windowMs);
 }
 
-function tooManyAttempts(retryAfter: number): Response {
-  return jsonResponse(
-    {
-      success: false,
-      message: "Too many attempts. Please wait and try again.",
-      error: { message: "Too many attempts. Please wait and try again.", status: 429 },
-    },
-    429,
-    { "Retry-After": String(retryAfter) },
-  );
-}
-
 // ---------------------------------------------------------------------------
-// Response helpers
+// CORS and response helpers
 // ---------------------------------------------------------------------------
 
-function jsonResponse(data: unknown, status = 200, headers: Record<string, string> = {}): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { "Content-Type": "application/json", ...headers },
-  });
+function resolveCorsOrigin(request: Request): string {
+  const reqOrigin = request.headers.get("origin");
+  const configured = process.env["CORS_ORIGIN"] || "";
+  if (!reqOrigin) return configured ? configured.split(",")[0]?.trim() || "*" : "*";
+
+  if (configured) {
+    const allowed = configured.split(",").map((s) => s.trim().toLowerCase());
+    const lowerReqOrigin = reqOrigin.toLowerCase();
+    if (allowed.includes("*") || allowed.includes(lowerReqOrigin)) {
+      return reqOrigin;
+    }
+    return allowed[0] || "";
+  }
+
+  // Safe defaults if CORS_ORIGIN is unset:
+  // In development, allow localhost origins or request origin
+  if (!isProductionServer()) {
+    return reqOrigin;
+  }
+
+  // In production, allow same-origin or explicit deployment domains
+  const host = request.headers.get("host");
+  if (host) {
+    try {
+      const parsedOrigin = new URL(reqOrigin);
+      if (parsedOrigin.host === host) {
+        return reqOrigin;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  return "";
 }
 
-function errorResponse(message: string, status = 400): Response {
-  return jsonResponse({ success: false, message, error: { message, status } }, status);
-}
-
-function successResponse<T>(data: T, status = 200): Response {
-  return jsonResponse({ success: true, data }, status);
+function getCorsHeaders(request: Request): Record<string, string> {
+  const origin = resolveCorsOrigin(request);
+  const headers: Record<string, string> = {
+    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
+    "Access-Control-Max-Age": "86400",
+  };
+  if (origin) {
+    headers["Access-Control-Allow-Origin"] = origin;
+    if (origin !== "*") {
+      headers["Vary"] = "Origin";
+    }
+  }
+  return headers;
 }
 
 /** Parses a JSON object body; anything else (null, array, garbage) becomes {}. */
@@ -367,8 +492,7 @@ async function getAuthUserFromToken(token: string): Promise<UserRecord | null> {
   if (!valid || !userId) return null;
   const active = await (await readyStore()).isSessionActive(sessionKey(token));
   if (!active) return null;
-  const db = await loadDatabase();
-  return db.users.find((u) => u.id === userId) ?? null;
+  return (await readyStore()).getUser(userId);
 }
 
 // ---------------------------------------------------------------------------
@@ -443,14 +567,43 @@ export async function handleApiFetch(request: Request): Promise<Response> {
   const path = url.pathname;
   const method = request.method.toUpperCase();
 
+  const corsHeaders = getCorsHeaders(request);
+
+  const jsonResponse = (
+    data: unknown,
+    status = 200,
+    extraHeaders: Record<string, string> = {},
+  ): Response => {
+    return new Response(JSON.stringify(data), {
+      status,
+      headers: { "Content-Type": "application/json", ...corsHeaders, ...extraHeaders },
+    });
+  };
+
+  const errorResponse = (message: string, status = 400): Response => {
+    return jsonResponse({ success: false, message, error: { message, status } }, status);
+  };
+
+  const successResponse = <T>(data: T, status = 200): Response => {
+    return jsonResponse({ success: true, data }, status);
+  };
+
+  const tooManyAttempts = (retryAfter: number): Response => {
+    return jsonResponse(
+      {
+        success: false,
+        message: "Too many attempts. Please wait and try again.",
+        error: { message: "Too many attempts. Please wait and try again.", status: 429 },
+      },
+      429,
+      { "Retry-After": String(retryAfter) },
+    );
+  };
+
   if (method === "OPTIONS") {
     return new Response(null, {
       status: 204,
-      headers: {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization",
-      },
+      headers: corsHeaders,
     });
   }
 
@@ -459,14 +612,40 @@ export async function handleApiFetch(request: Request): Promise<Response> {
   const token = parseBearerToken(authHeader);
   const authUser = await getAuthUserFromToken(token);
 
-  // 1. Health check
+  // 1. Health check — live database probe
   if (path === "/api/health" && method === "GET") {
-    return successResponse({ status: "ok", database: "connected" });
+    try {
+      const store = await readyStore();
+      const pingResult = await store.ping();
+      const isProd = isProductionServer();
+      const healthy = pingResult.ok && (isProd ? store.kind === "postgres" : true);
+      const statusCode = healthy ? 200 : 503;
+      return jsonResponse(
+        {
+          success: healthy,
+          status: healthy ? "ok" : "degraded",
+          database: store.kind === "postgres" ? "connected" : store.kind,
+          storeKind: store.kind,
+          detail: pingResult.message || (healthy ? "Operational" : "Database ping failed"),
+        },
+        statusCode,
+      );
+    } catch (err) {
+      return jsonResponse(
+        {
+          success: false,
+          status: "error",
+          database: "disconnected",
+          error: err instanceof Error ? err.message : String(err),
+        },
+        503,
+      );
+    }
   }
 
   // 2. Authentication: Register
   if (path === "/api/auth/register" && method === "POST") {
-    const limit = await takeRateLimit(`register:${ip}`, 5, 60 * 60 * 1000);
+    const limit = await takeRateLimit(`register:${ip}`, 25, 60 * 60 * 1000);
     if (!limit.ok) return tooManyAttempts(limit.retryAfter);
 
     const body = await readJson(request);
@@ -598,14 +777,18 @@ export async function handleApiFetch(request: Request): Promise<Response> {
       return true;
     });
 
+    let delivered = false;
     if (emailSent) {
-      await deliverCode(email, code, purpose);
+      delivered = await deliverCode(email, code, purpose);
+    } else if (isEmailConfigured()) {
+      // User account was not found; pretend delivery to prevent email enumeration
+      delivered = true;
     }
 
-    // Identical response whether or not the account exists — prevents
+    // Identical response structure whether or not the account exists — prevents
     // probing which emails are registered.
     return successResponse({
-      delivered: isEmailConfigured(),
+      delivered,
       devMode: !isEmailConfigured() && !isProductionServer(),
       expiresInMinutes: CODE_TTL_MS / 60_000,
     });
@@ -902,14 +1085,46 @@ export async function handleApiFetch(request: Request): Promise<Response> {
 
     if (method === "POST") {
       const body = (await readJson(request)) as Partial<TripRecord>;
+      const targetVehicleId = cleanString(body.vehicleId);
+      if (!targetVehicleId) {
+        return errorResponse("Vehicle is required for trip recording.", 400);
+      }
+      const ownedVehicle = db.vehicles.find(
+        (v) => v._id === targetVehicleId && v.userId === userId,
+      );
+      if (!ownedVehicle) {
+        return errorResponse(
+          "Selected vehicle does not exist or does not belong to your account.",
+          403,
+        );
+      }
+
+      if (body.date !== undefined && body.date !== "" && !isValidCalendarDate(body.date)) {
+        return errorResponse(
+          "Invalid trip date. Please provide a valid calendar date in YYYY-MM-DD format.",
+          400,
+        );
+      }
+
+      if (
+        (body.income !== undefined && Number(body.income) < 0) ||
+        (body.diesel !== undefined && Number(body.diesel) < 0) ||
+        (body.driverPayment !== undefined && Number(body.driverPayment) < 0) ||
+        (body.emiShare !== undefined && Number(body.emiShare) < 0)
+      ) {
+        return errorResponse("Trip income and expense amounts cannot be negative.", 400);
+      }
+
       const now = new Date().toISOString();
+      const tripDate =
+        body.date && isValidCalendarDate(body.date) ? String(body.date) : now.slice(0, 10);
       const items = normalizeExpenseItems(body.otherExpenseItems);
 
       const newTrip: TripRecord = {
         _id: `trp_${crypto.randomUUID()}`,
         userId,
-        vehicleId: cleanString(body.vehicleId),
-        date: DATE_RE.test(String(body.date || "")) ? String(body.date) : now.slice(0, 10),
+        vehicleId: targetVehicleId,
+        date: tripDate,
         income: toAmount(body.income),
         diesel: toAmount(body.diesel),
         driverPayment: toAmount(body.driverPayment),
@@ -939,6 +1154,37 @@ export async function handleApiFetch(request: Request): Promise<Response> {
 
     if (method === "PUT") {
       const body = (await readJson(request)) as Partial<TripRecord>;
+      const existingTrip = db.trips.find((t) => t._id === tripId && t.userId === userId);
+      if (!existingTrip) return errorResponse("Trip not found", 404);
+
+      if (body.vehicleId !== undefined) {
+        const newVehicleId = cleanString(body.vehicleId);
+        if (!newVehicleId) return errorResponse("Vehicle cannot be empty.", 400);
+        const owned = db.vehicles.find((v) => v._id === newVehicleId && v.userId === userId);
+        if (!owned) {
+          return errorResponse(
+            "Selected vehicle does not exist or does not belong to your account.",
+            403,
+          );
+        }
+      }
+
+      if (body.date !== undefined && !isValidCalendarDate(body.date)) {
+        return errorResponse(
+          "Invalid trip date. Please provide a valid calendar date in YYYY-MM-DD format.",
+          400,
+        );
+      }
+
+      if (
+        (body.income !== undefined && Number(body.income) < 0) ||
+        (body.diesel !== undefined && Number(body.diesel) < 0) ||
+        (body.driverPayment !== undefined && Number(body.driverPayment) < 0) ||
+        (body.emiShare !== undefined && Number(body.emiShare) < 0)
+      ) {
+        return errorResponse("Trip income and expense amounts cannot be negative.", 400);
+      }
+
       const updated = await withDatabase((d) => {
         const index = d.trips.findIndex((t) => t._id === tripId && t.userId === userId);
         if (index === -1) return null;
@@ -954,7 +1200,10 @@ export async function handleApiFetch(request: Request): Promise<Response> {
           createdAt: existing.createdAt,
           vehicleId:
             body.vehicleId !== undefined ? cleanString(body.vehicleId) : existing.vehicleId,
-          date: DATE_RE.test(String(body.date || "")) ? String(body.date) : existing.date,
+          date:
+            body.date !== undefined && isValidCalendarDate(body.date)
+              ? String(body.date)
+              : existing.date,
           income: body.income !== undefined ? toAmount(body.income) : existing.income,
           diesel: body.diesel !== undefined ? toAmount(body.diesel) : existing.diesel,
           driverPayment:
@@ -1036,6 +1285,18 @@ export async function handleApiFetch(request: Request): Promise<Response> {
           "Vehicle Calculation System"
         ).trim();
 
+        let validDefaultVehicle = current?.defaultVehicleId ?? null;
+        if (body.defaultVehicleId !== undefined) {
+          if (body.defaultVehicleId === null || body.defaultVehicleId === "") {
+            validDefaultVehicle = null;
+          } else {
+            const owned = d.vehicles.find(
+              (v) => v._id === body.defaultVehicleId && v.userId === userId,
+            );
+            validDefaultVehicle = owned ? owned._id : null;
+          }
+        }
+
         const next: SettingsRecord = {
           _id: current?._id || `set_${userId}`,
           userId,
@@ -1043,7 +1304,7 @@ export async function handleApiFetch(request: Request): Promise<Response> {
           transportationName: unifiedName,
           businessName: unifiedName,
           currency: cleanString(body.currency, 10) || current?.currency || "INR",
-          defaultVehicleId: body.defaultVehicleId ?? current?.defaultVehicleId ?? null,
+          defaultVehicleId: validDefaultVehicle,
           // Missing fields resolve to this account's own saved value first and
           // only then to an empty default — never to registration data or to
           // another account's profile.
@@ -1181,7 +1442,8 @@ function normalizeExpenseItems(raw: unknown): OtherExpenseItem[] {
 }
 
 function sumItems(items: OtherExpenseItem[]): number {
-  return items.reduce((sum, i) => sum + i.amount, 0);
+  const sum = items.reduce((acc, i) => acc + toAmount(i.amount), 0);
+  return Math.round(sum * 100) / 100;
 }
 
 export async function handleApiNode(req: IncomingMessage, res: ServerResponse): Promise<void> {

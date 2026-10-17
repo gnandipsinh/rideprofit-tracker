@@ -210,6 +210,9 @@ export class PgStore implements Store {
       ssl: isProduction() ? { rejectUnauthorized: false } : undefined,
       application_name: "rideprofit-api",
     });
+    this.pool.on("error", (err) => {
+      console.error("[db] Unexpected idle PostgreSQL client error:", err);
+    });
   }
 
   /** Applies the schema DDL. Idempotent — safe to run on every deploy. */
@@ -603,6 +606,25 @@ export class PgStore implements Store {
       `UPDATE rideprofit.sessions SET revoked_at = $2 WHERE user_id = $1 AND revoked_at IS NULL`,
       [userId, Date.now()],
     );
+  }
+
+  async getUser(id: string): Promise<UserRecord | null> {
+    const res = await this.pool.query<UserRow>(
+      "SELECT id, email, password, full_name, mobile, created_at FROM rideprofit.users WHERE id = $1",
+      [id],
+    );
+    const row = res.rows[0];
+    return row ? rowToUser(row) : null;
+  }
+
+  async ping(): Promise<{ ok: boolean; message?: string }> {
+    try {
+      const res = await this.pool.query<{ alive: number }>("SELECT 1 as alive");
+      const ok = res.rows[0]?.alive === 1;
+      return { ok, ...(ok ? {} : { message: "Unexpected response from database ping query" }) };
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err) };
+    }
   }
 
   async close(): Promise<void> {

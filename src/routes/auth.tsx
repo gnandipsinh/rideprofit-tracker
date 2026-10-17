@@ -437,11 +437,10 @@ function AuthPage() {
         return;
       }
       succeeded = true;
-      toast.success("Password updated");
+      toast.success("Password updated. Please sign in with your new password.");
       setPassword("");
       setConfirmPassword("");
-      // Full page reload: drops the old session and starts clean on "/".
-      window.location.href = "/";
+      reset("login");
     } catch {
       if (succeeded) return;
       setFormError(GENERIC_ERROR);

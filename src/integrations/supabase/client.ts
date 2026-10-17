@@ -80,7 +80,14 @@ function loadActiveSession(): RealSession | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(SESSION_STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as RealSession) : null;
+    if (!raw) return null;
+    const session = JSON.parse(raw) as RealSession;
+    const now = Math.floor(Date.now() / 1000);
+    if (session.expires_at && session.expires_at <= now) {
+      window.localStorage.removeItem(SESSION_STORAGE_KEY);
+      return null;
+    }
+    return session;
   } catch {
     return null;
   }
@@ -504,7 +511,27 @@ function createProductionAuth() {
       return { data: {}, error: null };
     },
 
-    async getClaims(_token?: string) {
+    async getClaims(token?: string) {
+      const activeToken = token || loadActiveSession()?.access_token;
+      if (!activeToken) return { data: { claims: {} }, error: null };
+      try {
+        const parts = activeToken.split(".");
+        if (parts.length === 3 && parts[1]) {
+          const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+          const padLength = (4 - (base64.length % 4)) % 4;
+          const padded = base64 + "=".repeat(padLength);
+          const json = decodeURIComponent(
+            atob(padded)
+              .split("")
+              .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+              .join(""),
+          );
+          const claims = JSON.parse(json) as Record<string, unknown>;
+          return { data: { claims }, error: null };
+        }
+      } catch {
+        /* fallback */
+      }
       return { data: { claims: {} }, error: null };
     },
   };
