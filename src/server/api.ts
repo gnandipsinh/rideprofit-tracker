@@ -160,7 +160,12 @@ const TOKEN_SECRET_MIN = 32;
 function getTokenSecret(): string {
   if (cachedSecret) return cachedSecret;
 
-  const envSecret = process.env["TOKEN_SECRET"];
+  const envSecret =
+    process.env["TOKEN_SECRET"] ||
+    process.env["JWT_SECRET"] ||
+    process.env["SUPABASE_JWT_SECRET"] ||
+    process.env["AUTH_SECRET"] ||
+    process.env["SECRET_KEY"];
 
   if (isProductionServer()) {
     // Production must never fall back to a generated per-instance secret: on a
@@ -488,11 +493,17 @@ function parseBearerToken(authHeader: string | null): string {
  */
 async function getAuthUserFromToken(token: string): Promise<UserRecord | null> {
   if (!token) return null;
-  const { userId, valid } = verifyToken(token, "access");
-  if (!valid || !userId) return null;
-  const active = await (await readyStore()).isSessionActive(sessionKey(token));
-  if (!active) return null;
-  return (await readyStore()).getUser(userId);
+  try {
+    const { userId, valid } = verifyToken(token, "access");
+    if (!valid || !userId) return null;
+    const store = await readyStore();
+    const active = await store.isSessionActive(sessionKey(token));
+    if (!active) return null;
+    return await store.getUser(userId);
+  } catch (err) {
+    console.warn("[auth] Session verification failed:", err instanceof Error ? err.message : err);
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -607,827 +618,840 @@ export async function handleApiFetch(request: Request): Promise<Response> {
     });
   }
 
-  const ip = clientIp(request);
-  const authHeader = request.headers.get("authorization");
-  const token = parseBearerToken(authHeader);
-  const authUser = await getAuthUserFromToken(token);
+  try {
+    const ip = clientIp(request);
+    const authHeader = request.headers.get("authorization");
+    const token = parseBearerToken(authHeader);
+    const authUser = await getAuthUserFromToken(token);
 
-  // 1. Health check — live database probe
-  if (path === "/api/health" && method === "GET") {
-    try {
-      const store = await readyStore();
-      const pingResult = await store.ping();
-      const isProd = isProductionServer();
-      const healthy = pingResult.ok && (isProd ? store.kind === "postgres" : true);
-      const statusCode = healthy ? 200 : 503;
-      return jsonResponse(
-        {
-          success: healthy,
-          status: healthy ? "ok" : "degraded",
-          database: store.kind === "postgres" ? "connected" : store.kind,
-          storeKind: store.kind,
-          detail: pingResult.message || (healthy ? "Operational" : "Database ping failed"),
-        },
-        statusCode,
-      );
-    } catch (err) {
-      return jsonResponse(
-        {
-          success: false,
-          status: "error",
-          database: "disconnected",
-          error: err instanceof Error ? err.message : String(err),
-        },
-        503,
-      );
-    }
-  }
-
-  // 2. Authentication: Register
-  if (path === "/api/auth/register" && method === "POST") {
-    const limit = await takeRateLimit(`register:${ip}`, 25, 60 * 60 * 1000);
-    if (!limit.ok) return tooManyAttempts(limit.retryAfter);
-
-    const body = await readJson(request);
-    const email = normalizeEmail(body["email"]);
-    const password = body["password"];
-
-    if (!isValidEmail(email)) return errorResponse("Enter a valid email address.", 400);
-    const passwordError = validatePassword(password);
-    if (passwordError) return errorResponse(passwordError, 400);
-
-    const fullName = cleanString(body["fullName"], NAME_MAX);
-    const mobile = cleanString(body["mobile"], 20);
-    if (fullName.length < 2) return errorResponse("Enter your full name.", 400);
-    if (!/^[6-9]\d{9}$/.test(mobile))
-      return errorResponse("Enter a valid 10-digit mobile number.", 400);
-
-    const hashedPassword = await hashPassword(password as string);
-    const userId = `usr_${crypto.randomUUID()}`;
-
-    const created = await withDatabase((db) => {
-      if (db.users.some((u) => u.email.toLowerCase() === email)) {
-        return null;
+    // 1. Health check — live database probe
+    if (path === "/api/health" && method === "GET") {
+      try {
+        const store = await readyStore();
+        const pingResult = await store.ping();
+        const isProd = isProductionServer();
+        const healthy = pingResult.ok && (isProd ? store.kind === "postgres" : true);
+        const statusCode = healthy ? 200 : 503;
+        return jsonResponse(
+          {
+            success: healthy,
+            status: healthy ? "ok" : "degraded",
+            database: store.kind === "postgres" ? "connected" : store.kind,
+            storeKind: store.kind,
+            detail: pingResult.message || (healthy ? "Operational" : "Database ping failed"),
+          },
+          statusCode,
+        );
+      } catch (err) {
+        return jsonResponse(
+          {
+            success: false,
+            status: "error",
+            database: "disconnected",
+            error: err instanceof Error ? err.message : String(err),
+          },
+          503,
+        );
       }
-      const newUser: UserRecord = {
-        id: userId,
-        email,
-        password: hashedPassword,
-        fullName,
-        mobile,
-        createdAt: new Date().toISOString(),
-      };
-      db.users.push(newUser);
-      return newUser;
-    });
-
-    if (!created) {
-      return errorResponse("An account with this email already exists.", 400);
     }
 
-    return successResponse({ user: safeUser(created), session: await sessionFor(created) }, 201);
-  }
+    // 2. Authentication: Register
+    if (path === "/api/auth/register" && method === "POST") {
+      const limit = await takeRateLimit(`register:${ip}`, 25, 60 * 60 * 1000);
+      if (!limit.ok) return tooManyAttempts(limit.retryAfter);
 
-  // 3. Authentication: Login
-  if (path === "/api/auth/login" && method === "POST") {
-    const body = await readJson(request);
-    const email = normalizeEmail(body["email"]);
-    const password = typeof body["password"] === "string" ? body["password"] : "";
+      const body = await readJson(request);
+      const email = normalizeEmail(body["email"]);
+      const password = body["password"];
 
-    if (!isValidEmail(email) || !password) {
-      return errorResponse("Email and password are required.", 400);
-    }
-
-    const limit = await takeRateLimit(`login:${ip}:${email}`, 8, 5 * 60 * 1000);
-    if (!limit.ok) return tooManyAttempts(limit.retryAfter);
-
-    // Same message and same work for unknown user vs. wrong password.
-    const invalidCredentials = () => errorResponse("Invalid email or password.", 401);
-
-    const result = await withDatabase(async (db) => {
-      const user = db.users.find((u) => u.email.toLowerCase() === email);
-      if (!user) return { user: null, upgraded: false };
-
-      const passwordOk = await verifyPassword(password, user.password || "");
-      if (!passwordOk) return { user: null, upgraded: false };
-
-      let upgraded = false;
-      if (user.password && !isHashedPassword(user.password)) {
-        user.password = await hashPassword(password);
-        upgraded = true;
-      }
-      return { user, upgraded };
-    });
-
-    if (!result.user) return invalidCredentials();
-    return successResponse({
-      user: safeUser(result.user),
-      session: await sessionFor(result.user),
-    });
-  }
-
-  // 3b. Request a login / password-reset code (sent by email)
-  if (path === "/api/auth/email-code" && method === "POST") {
-    const body = await readJson(request);
-    const email = normalizeEmail(body["email"]);
-    const purpose: unknown = body["purpose"];
-    if (!isValidEmail(email)) return errorResponse("Enter a valid email address.", 400);
-    if (purpose !== "login" && purpose !== "reset") {
-      return errorResponse("Invalid code purpose.", 400);
-    }
-
-    // In production, email delivery is the only way the user ever sees this
-    // code. Without a provider we must fail fast with a clear configuration
-    // error rather than store an undeliverable code and imply success.
-    if (isProductionServer() && !isEmailConfigured()) {
-      console.error(
-        "[auth] email login/reset requested in production but RESEND_API_KEY is not set. " +
-          "Configure RESEND_API_KEY (and RESEND_FROM) to enable email codes.",
-      );
-      return errorResponse(
-        "Email delivery is not configured on the server. Contact the administrator.",
-        503,
-      );
-    }
-
-    const byIp = await takeRateLimit(`code:${ip}`, 10, 60 * 60 * 1000);
-    if (!byIp.ok) return tooManyAttempts(byIp.retryAfter);
-    const byEmail = await takeRateLimit(`code:${email}`, 3, 15 * 60 * 1000);
-    if (!byEmail.ok) return tooManyAttempts(byEmail.retryAfter);
-
-    const code = generateCode();
-    const emailSent = await withDatabase((db) => {
-      const user = db.users.find((u) => u.email.toLowerCase() === email);
-      if (!user) return false;
-      // One live code per email+purpose.
-      db.pendingTokens = db.pendingTokens.filter(
-        (t) => !(t.email === email && t.purpose === purpose && !t.used),
-      );
-      const record: PendingTokenRecord = {
-        token: hashCode(code),
-        email,
-        userId: user.id,
-        purpose,
-        expiresAt: Date.now() + CODE_TTL_MS,
-        used: false,
-        attempts: 0,
-        createdAt: Date.now(),
-      };
-      db.pendingTokens.push(record);
-      return true;
-    });
-
-    let delivered = false;
-    if (emailSent) {
-      delivered = await deliverCode(email, code, purpose);
-    } else if (isEmailConfigured()) {
-      // User account was not found; pretend delivery to prevent email enumeration
-      delivered = true;
-    }
-
-    // Identical response structure whether or not the account exists — prevents
-    // probing which emails are registered.
-    return successResponse({
-      delivered,
-      devMode: !isEmailConfigured() && !isProductionServer(),
-      expiresInMinutes: CODE_TTL_MS / 60_000,
-    });
-  }
-
-  // 3c. Verify a code — signs the user in, or returns a short-lived reset token
-  if (path === "/api/auth/verify-code" && method === "POST") {
-    const body = await readJson(request);
-    const email = normalizeEmail(body["email"]);
-    const code = typeof body["code"] === "string" ? body["code"].trim() : "";
-    const purpose: unknown = body["purpose"];
-    if (!isValidEmail(email)) return errorResponse("Enter a valid email address.", 400);
-    if (purpose !== "login" && purpose !== "reset") {
-      return errorResponse("Invalid code purpose.", 400);
-    }
-
-    const byIp = await takeRateLimit(`verify:${ip}`, 10, 15 * 60 * 1000);
-    if (!byIp.ok) return tooManyAttempts(byIp.retryAfter);
-    const byEmail = await takeRateLimit(`verify:${email}`, 5, 15 * 60 * 1000);
-    if (!byEmail.ok) return tooManyAttempts(byEmail.retryAfter);
-
-    const outcome = await withDatabase((db) => {
-      const pending = db.pendingTokens
-        .filter((t) => t.email === email && t.purpose === purpose && !t.used)
-        .sort((a, b) => b.createdAt - a.createdAt)[0];
-
-      if (!pending || pending.expiresAt < Date.now()) {
-        if (pending) pending.used = true;
-        return { status: "expired" as const };
-      }
-
-      // Count every guess, not just matching ones — limits brute-forcing
-      // the 6-digit code space.
-      pending.attempts += 1;
-      if (pending.attempts > MAX_CODE_ATTEMPTS) {
-        pending.used = true;
-        return { status: "locked" as const };
-      }
-
-      if (!code || pending.token !== hashCode(code)) {
-        return { status: "invalid" as const };
-      }
-
-      pending.used = true;
-      const user = db.users.find((u) => u.id === pending.userId) ?? null;
-      if (!user) return { status: "expired" as const };
-      return { status: "ok" as const, user };
-    });
-
-    if (outcome.status !== "ok") {
-      if (outcome.status === "locked") {
-        return errorResponse("Too many incorrect attempts. Request a new code.", 400);
-      }
-      if (outcome.status === "expired") {
-        return errorResponse("This code has expired. Request a new one.", 400);
-      }
-      return errorResponse("Incorrect code. Please try again.", 400);
-    }
-
-    if (purpose === "login") {
-      return successResponse({
-        user: safeUser(outcome.user),
-        session: await sessionFor(outcome.user),
-      });
-    }
-
-    const resetToken = signToken(outcome.user.id, "reset", RESET_TOKEN_TTL_SECONDS);
-    return successResponse({ resetToken, expiresIn: RESET_TOKEN_TTL_SECONDS });
-  }
-
-  // 3d. Complete a password reset — requires a verified reset token
-  if (path === "/api/auth/reset-password" && method === "POST") {
-    const body = await readJson(request);
-    const email = normalizeEmail(body["email"]);
-    const resetToken = typeof body["resetToken"] === "string" ? body["resetToken"] : "";
-    const newPassword = body["newPassword"];
-
-    const limit = await takeRateLimit(`reset:${ip}`, 5, 15 * 60 * 1000);
-    if (!limit.ok) return tooManyAttempts(limit.retryAfter);
-
-    if (!resetToken) {
-      return errorResponse("A verified reset code is required to change a password.", 400);
-    }
-    const passwordError = validatePassword(newPassword);
-    if (passwordError) return errorResponse(passwordError, 400);
-
-    const { userId, valid } = verifyToken(resetToken, "reset");
-    if (!valid || !userId) {
-      return errorResponse("This reset code has expired. Request a new one.", 400);
-    }
-
-    // Reset tokens are single-use: the spent token is recorded and rejected.
-    const tokenHash = crypto.createHash("sha256").update(resetToken).digest("hex");
-    const hashedPassword = await hashPassword(newPassword as string);
-
-    const outcome = await withDatabase((db) => {
-      const consumed = db.consumedResetTokens ?? [];
-      if (consumed.some((c) => c.hash === tokenHash)) return { status: "used" as const };
-
-      const user = db.users.find((u) => u.id === userId && u.email.toLowerCase() === email);
-      if (!user) return { status: "expired" as const };
-
-      user.password = hashedPassword;
-      db.consumedResetTokens = [...consumed, { hash: tokenHash, at: Date.now() }];
-      db.pendingTokens = db.pendingTokens.filter((t) => t.email !== email);
-      return { status: "ok" as const };
-    });
-
-    if (outcome.status === "used") {
-      return errorResponse("This reset code has already been used. Request a new one.", 400);
-    }
-    if (outcome.status !== "ok") {
-      return errorResponse("This reset code has expired. Request a new one.", 400);
-    }
-    // A password reset means the old credentials may be compromised: revoke
-    // every session for this user so any hijacked token stops working.
-    await (await readyStore()).revokeAllSessions(userId);
-    return successResponse({ message: "Password updated successfully." });
-  }
-
-  // 3b. Logout — revoke the presented access token server-side. Idempotent:
-  // a missing/already-revoked token still returns success so the client can
-  // always clear its local state.
-  if (path === "/api/auth/logout" && method === "POST") {
-    const token = parseBearerToken(request.headers.get("authorization"));
-    if (token) {
-      await (await readyStore()).revokeSession(sessionKey(token));
-    }
-    return successResponse({ message: "Signed out." });
-  }
-
-  // 4. Current user session
-  if (path === "/api/auth/me" && method === "GET") {
-    if (!authUser) return errorResponse("Authentication is required.", 401);
-    return successResponse({ user: safeUser(authUser) });
-  }
-
-  // 4b. Update user profile/password (requires an access token)
-  if (
-    (path === "/api/auth/update" || path === "/api/auth/profile") &&
-    (method === "POST" || method === "PUT")
-  ) {
-    if (!authUser) return errorResponse("Authentication is required.", 401);
-    const limit = await takeRateLimit(`update:${ip}`, 20, 5 * 60 * 1000);
-    if (!limit.ok) return tooManyAttempts(limit.retryAfter);
-
-    const body = await readJson(request);
-
-    let newPasswordHash: string | null = null;
-    if (body["password"] !== undefined && body["password"] !== "") {
-      const passwordError = validatePassword(body["password"]);
+      if (!isValidEmail(email)) return errorResponse("Enter a valid email address.", 400);
+      const passwordError = validatePassword(password);
       if (passwordError) return errorResponse(passwordError, 400);
-      newPasswordHash = await hashPassword(body["password"] as string);
-    }
-    const fullName =
-      body["fullName"] !== undefined ? cleanString(body["fullName"], NAME_MAX) : undefined;
-    const mobile = body["mobile"] !== undefined ? cleanString(body["mobile"], 20) : undefined;
 
-    const updated = await withDatabase((db) => {
-      const user = db.users.find((u) => u.id === authUser.id);
-      if (!user) return null;
-      if (newPasswordHash) user.password = newPasswordHash;
-      if (fullName !== undefined) user.fullName = fullName;
-      if (mobile !== undefined) user.mobile = mobile;
+      const fullName = cleanString(body["fullName"], NAME_MAX);
+      const mobile = cleanString(body["mobile"], 20);
+      if (fullName.length < 2) return errorResponse("Enter your full name.", 400);
+      if (!/^[6-9]\d{9}$/.test(mobile))
+        return errorResponse("Enter a valid 10-digit mobile number.", 400);
 
-      const settings = db.settings.find((s) => s.userId === authUser.id);
-      if (settings) {
-        if (fullName) settings.fullName = fullName;
-        if (mobile) {
-          settings.mobileNumber = mobile;
-          settings.contactNumber = mobile;
+      const hashedPassword = await hashPassword(password as string);
+      const userId = `usr_${crypto.randomUUID()}`;
+
+      const created = await withDatabase((db) => {
+        if (db.users.some((u) => u.email.toLowerCase() === email)) {
+          return null;
         }
-      }
-      return user;
-    });
-
-    if (!updated) return errorResponse("User not found.", 404);
-    // Changing the password revokes every other session for this user. The
-    // fresh token minted by sessionFor() below re-activates only the current
-    // device, so the user stays signed in here but everywhere else must re-login.
-    if (newPasswordHash) {
-      await (await readyStore()).revokeAllSessions(updated.id);
-    }
-    return successResponse({ user: safeUser(updated), session: await sessionFor(updated) });
-  }
-
-  // 5. Protected routes require a valid signed access token
-  if (!authUser) {
-    return errorResponse("Authentication is required.", 401);
-  }
-
-  const userId = authUser.id;
-  const db = await loadDatabase();
-
-  // 6. Vehicles API
-  if (path === "/api/vehicles") {
-    if (method === "GET") {
-      return successResponse(db.vehicles.filter((v) => v.userId === userId));
-    }
-
-    if (method === "POST") {
-      const body = (await readJson(request)) as Partial<VehicleRecord>;
-      const now = new Date().toISOString();
-      const newVehicle: VehicleRecord = {
-        // IDs are always generated server-side.
-        _id: `veh_${crypto.randomUUID()}`,
-        userId,
-        name: cleanString(body.name),
-        type: cleanString(body.type) || "Truck",
-        model: cleanString(body.model),
-        vehicleNumber: cleanString(body.vehicleNumber),
-        notes: cleanString(body.notes, NOTES_MAX),
-        isActive: body.isActive ?? true,
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      await withDatabase((d) => {
-        d.vehicles.push(newVehicle);
-      });
-      return successResponse(newVehicle, 201);
-    }
-  }
-
-  if (path.startsWith("/api/vehicles/")) {
-    const vehicleId = path.replace("/api/vehicles/", "").split("/")[0];
-
-    if (method === "GET") {
-      const found = db.vehicles.find((v) => v._id === vehicleId && v.userId === userId);
-      if (!found) return errorResponse("Vehicle not found", 404);
-      return successResponse(found);
-    }
-
-    if (method === "PUT") {
-      const body = (await readJson(request)) as Partial<VehicleRecord>;
-      const updated = await withDatabase((d) => {
-        const index = d.vehicles.findIndex((v) => v._id === vehicleId && v.userId === userId);
-        if (index === -1) return null;
-        const existing = d.vehicles[index];
-        if (!existing) return null;
-        const next: VehicleRecord = {
-          _id: existing._id,
-          userId: existing.userId,
-          createdAt: existing.createdAt,
-          name: body.name !== undefined ? cleanString(body.name) : existing.name,
-          type: body.type !== undefined ? cleanString(body.type) : existing.type,
-          model: body.model !== undefined ? cleanString(body.model) : existing.model,
-          vehicleNumber:
-            body.vehicleNumber !== undefined
-              ? cleanString(body.vehicleNumber)
-              : existing.vehicleNumber,
-          notes: body.notes !== undefined ? cleanString(body.notes, NOTES_MAX) : existing.notes,
-          isActive: body.isActive !== undefined ? Boolean(body.isActive) : existing.isActive,
-          updatedAt: new Date().toISOString(),
+        const newUser: UserRecord = {
+          id: userId,
+          email,
+          password: hashedPassword,
+          fullName,
+          mobile,
+          createdAt: new Date().toISOString(),
         };
-        d.vehicles[index] = next;
-        return next;
+        db.users.push(newUser);
+        return newUser;
       });
-      if (!updated) return errorResponse("Vehicle not found", 404);
-      return successResponse(updated);
+
+      if (!created) {
+        return errorResponse("An account with this email already exists.", 400);
+      }
+
+      return successResponse({ user: safeUser(created), session: await sessionFor(created) }, 201);
     }
 
-    if (method === "DELETE") {
-      const result = await withDatabase((d) => {
-        const index = d.vehicles.findIndex((v) => v._id === vehicleId && v.userId === userId);
-        if (index === -1) return null;
-        d.vehicles.splice(index, 1);
-        const priorTripCount = d.trips.length;
-        d.trips = d.trips.filter((t) => !(t.vehicleId === vehicleId && t.userId === userId));
-        return { deletedTrips: priorTripCount - d.trips.length };
+    // 3. Authentication: Login
+    if (path === "/api/auth/login" && method === "POST") {
+      const body = await readJson(request);
+      const email = normalizeEmail(body["email"]);
+      const password = typeof body["password"] === "string" ? body["password"] : "";
+
+      if (!isValidEmail(email) || !password) {
+        return errorResponse("Email and password are required.", 400);
+      }
+
+      const limit = await takeRateLimit(`login:${ip}:${email}`, 8, 5 * 60 * 1000);
+      if (!limit.ok) return tooManyAttempts(limit.retryAfter);
+
+      // Same message and same work for unknown user vs. wrong password.
+      const invalidCredentials = () => errorResponse("Invalid email or password.", 401);
+
+      const result = await withDatabase(async (db) => {
+        const user = db.users.find((u) => u.email.toLowerCase() === email);
+        if (!user) return { user: null, upgraded: false };
+
+        const passwordOk = await verifyPassword(password, user.password || "");
+        if (!passwordOk) return { user: null, upgraded: false };
+
+        let upgraded = false;
+        if (user.password && !isHashedPassword(user.password)) {
+          user.password = await hashPassword(password);
+          upgraded = true;
+        }
+        return { user, upgraded };
       });
-      if (!result) return errorResponse("Vehicle not found", 404);
-      return successResponse(result);
-    }
-  }
 
-  // 7. Trips API
-  if (path === "/api/trips") {
-    if (method === "GET") {
-      const vehicleIdParam = url.searchParams.get("vehicleId");
-      const fromDate = url.searchParams.get("fromDate");
-      const toDate = url.searchParams.get("toDate");
-
-      let trips = db.trips.filter((t) => t.userId === userId);
-      if (vehicleIdParam && vehicleIdParam !== "all") {
-        trips = trips.filter((t) => t.vehicleId === vehicleIdParam);
-      }
-      if (fromDate) trips = trips.filter((t) => t.date >= fromDate);
-      if (toDate) trips = trips.filter((t) => t.date <= toDate);
-
-      trips.sort((a, b) => b.date.localeCompare(a.date));
-      return successResponse(trips);
+      if (!result.user) return invalidCredentials();
+      return successResponse({
+        user: safeUser(result.user),
+        session: await sessionFor(result.user),
+      });
     }
 
-    if (method === "POST") {
-      const body = (await readJson(request)) as Partial<TripRecord>;
-      const targetVehicleId = cleanString(body.vehicleId);
-      if (!targetVehicleId) {
-        return errorResponse("Vehicle is required for trip recording.", 400);
+    // 3b. Request a login / password-reset code (sent by email)
+    if (path === "/api/auth/email-code" && method === "POST") {
+      const body = await readJson(request);
+      const email = normalizeEmail(body["email"]);
+      const purpose: unknown = body["purpose"];
+      if (!isValidEmail(email)) return errorResponse("Enter a valid email address.", 400);
+      if (purpose !== "login" && purpose !== "reset") {
+        return errorResponse("Invalid code purpose.", 400);
       }
-      const ownedVehicle = db.vehicles.find(
-        (v) => v._id === targetVehicleId && v.userId === userId,
-      );
-      if (!ownedVehicle) {
+
+      // In production, email delivery is the only way the user ever sees this
+      // code. Without a provider we must fail fast with a clear configuration
+      // error rather than store an undeliverable code and imply success.
+      if (isProductionServer() && !isEmailConfigured()) {
+        console.error(
+          "[auth] email login/reset requested in production but RESEND_API_KEY is not set. " +
+            "Configure RESEND_API_KEY (and RESEND_FROM) to enable email codes.",
+        );
         return errorResponse(
-          "Selected vehicle does not exist or does not belong to your account.",
-          403,
+          "Email delivery is not configured on the server. Contact the administrator.",
+          503,
         );
       }
 
-      if (body.date !== undefined && body.date !== "" && !isValidCalendarDate(body.date)) {
-        return errorResponse(
-          "Invalid trip date. Please provide a valid calendar date in YYYY-MM-DD format.",
-          400,
+      const byIp = await takeRateLimit(`code:${ip}`, 10, 60 * 60 * 1000);
+      if (!byIp.ok) return tooManyAttempts(byIp.retryAfter);
+      const byEmail = await takeRateLimit(`code:${email}`, 3, 15 * 60 * 1000);
+      if (!byEmail.ok) return tooManyAttempts(byEmail.retryAfter);
+
+      const code = generateCode();
+      const emailSent = await withDatabase((db) => {
+        const user = db.users.find((u) => u.email.toLowerCase() === email);
+        if (!user) return false;
+        // One live code per email+purpose.
+        db.pendingTokens = db.pendingTokens.filter(
+          (t) => !(t.email === email && t.purpose === purpose && !t.used),
         );
-      }
-
-      if (
-        (body.income !== undefined && Number(body.income) < 0) ||
-        (body.diesel !== undefined && Number(body.diesel) < 0) ||
-        (body.driverPayment !== undefined && Number(body.driverPayment) < 0) ||
-        (body.emiShare !== undefined && Number(body.emiShare) < 0)
-      ) {
-        return errorResponse("Trip income and expense amounts cannot be negative.", 400);
-      }
-
-      const now = new Date().toISOString();
-      const tripDate =
-        body.date && isValidCalendarDate(body.date) ? String(body.date) : now.slice(0, 10);
-      const items = normalizeExpenseItems(body.otherExpenseItems);
-
-      const newTrip: TripRecord = {
-        _id: `trp_${crypto.randomUUID()}`,
-        userId,
-        vehicleId: targetVehicleId,
-        date: tripDate,
-        income: toAmount(body.income),
-        diesel: toAmount(body.diesel),
-        driverPayment: toAmount(body.driverPayment),
-        emiShare: toAmount(body.emiShare),
-        otherExpenseItems: items,
-        otherExpenses: sumItems(items),
-        notes: cleanString(body.notes, NOTES_MAX),
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      await withDatabase((d) => {
-        d.trips.push(newTrip);
+        const record: PendingTokenRecord = {
+          token: hashCode(code),
+          email,
+          userId: user.id,
+          purpose,
+          expiresAt: Date.now() + CODE_TTL_MS,
+          used: false,
+          attempts: 0,
+          createdAt: Date.now(),
+        };
+        db.pendingTokens.push(record);
+        return true;
       });
-      return successResponse(newTrip, 201);
+
+      let delivered = false;
+      if (emailSent) {
+        delivered = await deliverCode(email, code, purpose);
+      } else if (isEmailConfigured()) {
+        // User account was not found; pretend delivery to prevent email enumeration
+        delivered = true;
+      }
+
+      // Identical response structure whether or not the account exists — prevents
+      // probing which emails are registered.
+      return successResponse({
+        delivered,
+        devMode: !isEmailConfigured() && !isProductionServer(),
+        expiresInMinutes: CODE_TTL_MS / 60_000,
+      });
     }
-  }
 
-  if (path.startsWith("/api/trips/")) {
-    const tripId = path.replace("/api/trips/", "").split("/")[0];
+    // 3c. Verify a code — signs the user in, or returns a short-lived reset token
+    if (path === "/api/auth/verify-code" && method === "POST") {
+      const body = await readJson(request);
+      const email = normalizeEmail(body["email"]);
+      const code = typeof body["code"] === "string" ? body["code"].trim() : "";
+      const purpose: unknown = body["purpose"];
+      if (!isValidEmail(email)) return errorResponse("Enter a valid email address.", 400);
+      if (purpose !== "login" && purpose !== "reset") {
+        return errorResponse("Invalid code purpose.", 400);
+      }
 
-    if (method === "GET") {
-      const found = db.trips.find((t) => t._id === tripId && t.userId === userId);
-      if (!found) return errorResponse("Trip not found", 404);
-      return successResponse(found);
+      const byIp = await takeRateLimit(`verify:${ip}`, 10, 15 * 60 * 1000);
+      if (!byIp.ok) return tooManyAttempts(byIp.retryAfter);
+      const byEmail = await takeRateLimit(`verify:${email}`, 5, 15 * 60 * 1000);
+      if (!byEmail.ok) return tooManyAttempts(byEmail.retryAfter);
+
+      const outcome = await withDatabase((db) => {
+        const pending = db.pendingTokens
+          .filter((t) => t.email === email && t.purpose === purpose && !t.used)
+          .sort((a, b) => b.createdAt - a.createdAt)[0];
+
+        if (!pending || pending.expiresAt < Date.now()) {
+          if (pending) pending.used = true;
+          return { status: "expired" as const };
+        }
+
+        // Count every guess, not just matching ones — limits brute-forcing
+        // the 6-digit code space.
+        pending.attempts += 1;
+        if (pending.attempts > MAX_CODE_ATTEMPTS) {
+          pending.used = true;
+          return { status: "locked" as const };
+        }
+
+        if (!code || pending.token !== hashCode(code)) {
+          return { status: "invalid" as const };
+        }
+
+        pending.used = true;
+        const user = db.users.find((u) => u.id === pending.userId) ?? null;
+        if (!user) return { status: "expired" as const };
+        return { status: "ok" as const, user };
+      });
+
+      if (outcome.status !== "ok") {
+        if (outcome.status === "locked") {
+          return errorResponse("Too many incorrect attempts. Request a new code.", 400);
+        }
+        if (outcome.status === "expired") {
+          return errorResponse("This code has expired. Request a new one.", 400);
+        }
+        return errorResponse("Incorrect code. Please try again.", 400);
+      }
+
+      if (purpose === "login") {
+        return successResponse({
+          user: safeUser(outcome.user),
+          session: await sessionFor(outcome.user),
+        });
+      }
+
+      const resetToken = signToken(outcome.user.id, "reset", RESET_TOKEN_TTL_SECONDS);
+      return successResponse({ resetToken, expiresIn: RESET_TOKEN_TTL_SECONDS });
     }
 
-    if (method === "PUT") {
-      const body = (await readJson(request)) as Partial<TripRecord>;
-      const existingTrip = db.trips.find((t) => t._id === tripId && t.userId === userId);
-      if (!existingTrip) return errorResponse("Trip not found", 404);
+    // 3d. Complete a password reset — requires a verified reset token
+    if (path === "/api/auth/reset-password" && method === "POST") {
+      const body = await readJson(request);
+      const email = normalizeEmail(body["email"]);
+      const resetToken = typeof body["resetToken"] === "string" ? body["resetToken"] : "";
+      const newPassword = body["newPassword"];
 
-      if (body.vehicleId !== undefined) {
-        const newVehicleId = cleanString(body.vehicleId);
-        if (!newVehicleId) return errorResponse("Vehicle cannot be empty.", 400);
-        const owned = db.vehicles.find((v) => v._id === newVehicleId && v.userId === userId);
-        if (!owned) {
+      const limit = await takeRateLimit(`reset:${ip}`, 5, 15 * 60 * 1000);
+      if (!limit.ok) return tooManyAttempts(limit.retryAfter);
+
+      if (!resetToken) {
+        return errorResponse("A verified reset code is required to change a password.", 400);
+      }
+      const passwordError = validatePassword(newPassword);
+      if (passwordError) return errorResponse(passwordError, 400);
+
+      const { userId, valid } = verifyToken(resetToken, "reset");
+      if (!valid || !userId) {
+        return errorResponse("This reset code has expired. Request a new one.", 400);
+      }
+
+      // Reset tokens are single-use: the spent token is recorded and rejected.
+      const tokenHash = crypto.createHash("sha256").update(resetToken).digest("hex");
+      const hashedPassword = await hashPassword(newPassword as string);
+
+      const outcome = await withDatabase((db) => {
+        const consumed = db.consumedResetTokens ?? [];
+        if (consumed.some((c) => c.hash === tokenHash)) return { status: "used" as const };
+
+        const user = db.users.find((u) => u.id === userId && u.email.toLowerCase() === email);
+        if (!user) return { status: "expired" as const };
+
+        user.password = hashedPassword;
+        db.consumedResetTokens = [...consumed, { hash: tokenHash, at: Date.now() }];
+        db.pendingTokens = db.pendingTokens.filter((t) => t.email !== email);
+        return { status: "ok" as const };
+      });
+
+      if (outcome.status === "used") {
+        return errorResponse("This reset code has already been used. Request a new one.", 400);
+      }
+      if (outcome.status !== "ok") {
+        return errorResponse("This reset code has expired. Request a new one.", 400);
+      }
+      // A password reset means the old credentials may be compromised: revoke
+      // every session for this user so any hijacked token stops working.
+      await (await readyStore()).revokeAllSessions(userId);
+      return successResponse({ message: "Password updated successfully." });
+    }
+
+    // 3b. Logout — revoke the presented access token server-side. Idempotent:
+    // a missing/already-revoked token still returns success so the client can
+    // always clear its local state.
+    if (path === "/api/auth/logout" && method === "POST") {
+      const token = parseBearerToken(request.headers.get("authorization"));
+      if (token) {
+        await (await readyStore()).revokeSession(sessionKey(token));
+      }
+      return successResponse({ message: "Signed out." });
+    }
+
+    // 4. Current user session
+    if (path === "/api/auth/me" && method === "GET") {
+      if (!authUser) return errorResponse("Authentication is required.", 401);
+      return successResponse({ user: safeUser(authUser) });
+    }
+
+    // 4b. Update user profile/password (requires an access token)
+    if (
+      (path === "/api/auth/update" || path === "/api/auth/profile") &&
+      (method === "POST" || method === "PUT")
+    ) {
+      if (!authUser) return errorResponse("Authentication is required.", 401);
+      const limit = await takeRateLimit(`update:${ip}`, 20, 5 * 60 * 1000);
+      if (!limit.ok) return tooManyAttempts(limit.retryAfter);
+
+      const body = await readJson(request);
+
+      let newPasswordHash: string | null = null;
+      if (body["password"] !== undefined && body["password"] !== "") {
+        const passwordError = validatePassword(body["password"]);
+        if (passwordError) return errorResponse(passwordError, 400);
+        newPasswordHash = await hashPassword(body["password"] as string);
+      }
+      const fullName =
+        body["fullName"] !== undefined ? cleanString(body["fullName"], NAME_MAX) : undefined;
+      const mobile = body["mobile"] !== undefined ? cleanString(body["mobile"], 20) : undefined;
+
+      const updated = await withDatabase((db) => {
+        const user = db.users.find((u) => u.id === authUser.id);
+        if (!user) return null;
+        if (newPasswordHash) user.password = newPasswordHash;
+        if (fullName !== undefined) user.fullName = fullName;
+        if (mobile !== undefined) user.mobile = mobile;
+
+        const settings = db.settings.find((s) => s.userId === authUser.id);
+        if (settings) {
+          if (fullName) settings.fullName = fullName;
+          if (mobile) {
+            settings.mobileNumber = mobile;
+            settings.contactNumber = mobile;
+          }
+        }
+        return user;
+      });
+
+      if (!updated) return errorResponse("User not found.", 404);
+      // Changing the password revokes every other session for this user. The
+      // fresh token minted by sessionFor() below re-activates only the current
+      // device, so the user stays signed in here but everywhere else must re-login.
+      if (newPasswordHash) {
+        await (await readyStore()).revokeAllSessions(updated.id);
+      }
+      return successResponse({ user: safeUser(updated), session: await sessionFor(updated) });
+    }
+
+    // 5. Protected routes require a valid signed access token
+    if (!authUser) {
+      return errorResponse("Authentication is required.", 401);
+    }
+
+    const userId = authUser.id;
+    const db = await loadDatabase();
+
+    // 6. Vehicles API
+    if (path === "/api/vehicles") {
+      if (method === "GET") {
+        return successResponse(db.vehicles.filter((v) => v.userId === userId));
+      }
+
+      if (method === "POST") {
+        const body = (await readJson(request)) as Partial<VehicleRecord>;
+        const now = new Date().toISOString();
+        const newVehicle: VehicleRecord = {
+          // IDs are always generated server-side.
+          _id: `veh_${crypto.randomUUID()}`,
+          userId,
+          name: cleanString(body.name),
+          type: cleanString(body.type) || "Truck",
+          model: cleanString(body.model),
+          vehicleNumber: cleanString(body.vehicleNumber),
+          notes: cleanString(body.notes, NOTES_MAX),
+          isActive: body.isActive ?? true,
+          createdAt: now,
+          updatedAt: now,
+        };
+
+        await withDatabase((d) => {
+          d.vehicles.push(newVehicle);
+        });
+        return successResponse(newVehicle, 201);
+      }
+    }
+
+    if (path.startsWith("/api/vehicles/")) {
+      const vehicleId = path.replace("/api/vehicles/", "").split("/")[0];
+
+      if (method === "GET") {
+        const found = db.vehicles.find((v) => v._id === vehicleId && v.userId === userId);
+        if (!found) return errorResponse("Vehicle not found", 404);
+        return successResponse(found);
+      }
+
+      if (method === "PUT") {
+        const body = (await readJson(request)) as Partial<VehicleRecord>;
+        const updated = await withDatabase((d) => {
+          const index = d.vehicles.findIndex((v) => v._id === vehicleId && v.userId === userId);
+          if (index === -1) return null;
+          const existing = d.vehicles[index];
+          if (!existing) return null;
+          const next: VehicleRecord = {
+            _id: existing._id,
+            userId: existing.userId,
+            createdAt: existing.createdAt,
+            name: body.name !== undefined ? cleanString(body.name) : existing.name,
+            type: body.type !== undefined ? cleanString(body.type) : existing.type,
+            model: body.model !== undefined ? cleanString(body.model) : existing.model,
+            vehicleNumber:
+              body.vehicleNumber !== undefined
+                ? cleanString(body.vehicleNumber)
+                : existing.vehicleNumber,
+            notes: body.notes !== undefined ? cleanString(body.notes, NOTES_MAX) : existing.notes,
+            isActive: body.isActive !== undefined ? Boolean(body.isActive) : existing.isActive,
+            updatedAt: new Date().toISOString(),
+          };
+          d.vehicles[index] = next;
+          return next;
+        });
+        if (!updated) return errorResponse("Vehicle not found", 404);
+        return successResponse(updated);
+      }
+
+      if (method === "DELETE") {
+        const result = await withDatabase((d) => {
+          const index = d.vehicles.findIndex((v) => v._id === vehicleId && v.userId === userId);
+          if (index === -1) return null;
+          d.vehicles.splice(index, 1);
+          const priorTripCount = d.trips.length;
+          d.trips = d.trips.filter((t) => !(t.vehicleId === vehicleId && t.userId === userId));
+          return { deletedTrips: priorTripCount - d.trips.length };
+        });
+        if (!result) return errorResponse("Vehicle not found", 404);
+        return successResponse(result);
+      }
+    }
+
+    // 7. Trips API
+    if (path === "/api/trips") {
+      if (method === "GET") {
+        const vehicleIdParam = url.searchParams.get("vehicleId");
+        const fromDate = url.searchParams.get("fromDate");
+        const toDate = url.searchParams.get("toDate");
+
+        let trips = db.trips.filter((t) => t.userId === userId);
+        if (vehicleIdParam && vehicleIdParam !== "all") {
+          trips = trips.filter((t) => t.vehicleId === vehicleIdParam);
+        }
+        if (fromDate) trips = trips.filter((t) => t.date >= fromDate);
+        if (toDate) trips = trips.filter((t) => t.date <= toDate);
+
+        trips.sort((a, b) => b.date.localeCompare(a.date));
+        return successResponse(trips);
+      }
+
+      if (method === "POST") {
+        const body = (await readJson(request)) as Partial<TripRecord>;
+        const targetVehicleId = cleanString(body.vehicleId);
+        if (!targetVehicleId) {
+          return errorResponse("Vehicle is required for trip recording.", 400);
+        }
+        const ownedVehicle = db.vehicles.find(
+          (v) => v._id === targetVehicleId && v.userId === userId,
+        );
+        if (!ownedVehicle) {
           return errorResponse(
             "Selected vehicle does not exist or does not belong to your account.",
             403,
           );
         }
-      }
 
-      if (body.date !== undefined && !isValidCalendarDate(body.date)) {
-        return errorResponse(
-          "Invalid trip date. Please provide a valid calendar date in YYYY-MM-DD format.",
-          400,
-        );
-      }
+        if (body.date !== undefined && body.date !== "" && !isValidCalendarDate(body.date)) {
+          return errorResponse(
+            "Invalid trip date. Please provide a valid calendar date in YYYY-MM-DD format.",
+            400,
+          );
+        }
 
-      if (
-        (body.income !== undefined && Number(body.income) < 0) ||
-        (body.diesel !== undefined && Number(body.diesel) < 0) ||
-        (body.driverPayment !== undefined && Number(body.driverPayment) < 0) ||
-        (body.emiShare !== undefined && Number(body.emiShare) < 0)
-      ) {
-        return errorResponse("Trip income and expense amounts cannot be negative.", 400);
-      }
+        if (
+          (body.income !== undefined && Number(body.income) < 0) ||
+          (body.diesel !== undefined && Number(body.diesel) < 0) ||
+          (body.driverPayment !== undefined && Number(body.driverPayment) < 0) ||
+          (body.emiShare !== undefined && Number(body.emiShare) < 0)
+        ) {
+          return errorResponse("Trip income and expense amounts cannot be negative.", 400);
+        }
 
-      const updated = await withDatabase((d) => {
-        const index = d.trips.findIndex((t) => t._id === tripId && t.userId === userId);
-        if (index === -1) return null;
-        const existing = d.trips[index];
-        if (!existing) return null;
-        const items =
-          body.otherExpenseItems !== undefined
-            ? normalizeExpenseItems(body.otherExpenseItems)
-            : existing.otherExpenseItems;
-        const next: TripRecord = {
-          _id: existing._id,
-          userId: existing.userId,
-          createdAt: existing.createdAt,
-          vehicleId:
-            body.vehicleId !== undefined ? cleanString(body.vehicleId) : existing.vehicleId,
-          date:
-            body.date !== undefined && isValidCalendarDate(body.date)
-              ? String(body.date)
-              : existing.date,
-          income: body.income !== undefined ? toAmount(body.income) : existing.income,
-          diesel: body.diesel !== undefined ? toAmount(body.diesel) : existing.diesel,
-          driverPayment:
-            body.driverPayment !== undefined
-              ? toAmount(body.driverPayment)
-              : existing.driverPayment,
-          emiShare: body.emiShare !== undefined ? toAmount(body.emiShare) : existing.emiShare,
-          otherExpenseItems: items,
-          // Always derived from the items — one source of truth.
-          otherExpenses: sumItems(items),
-          notes: body.notes !== undefined ? cleanString(body.notes, NOTES_MAX) : existing.notes,
-          updatedAt: new Date().toISOString(),
-        };
-        d.trips[index] = next;
-        return next;
-      });
-      if (!updated) return errorResponse("Trip not found", 404);
-      return successResponse(updated);
-    }
+        const now = new Date().toISOString();
+        const tripDate =
+          body.date && isValidCalendarDate(body.date) ? String(body.date) : now.slice(0, 10);
+        const items = normalizeExpenseItems(body.otherExpenseItems);
 
-    if (method === "DELETE") {
-      const removed = await withDatabase((d) => {
-        const index = d.trips.findIndex((t) => t._id === tripId && t.userId === userId);
-        if (index === -1) return false;
-        d.trips.splice(index, 1);
-        return true;
-      });
-      if (!removed) return errorResponse("Trip not found", 404);
-      return successResponse({ _id: tripId });
-    }
-  }
-
-  // 8. Settings API
-  if (path === "/api/settings") {
-    if (method === "GET") {
-      const existing = db.settings.find((s) => s.userId === userId);
-      if (existing) return successResponse(existing);
-
-      const created = await withDatabase((d) => {
-        const found = d.settings.find((s) => s.userId === userId);
-        if (found) return found;
-        // A genuinely new account starts with a CLEAN profile. No full name,
-        // mobile, transport/business name, business email or address is ever
-        // derived from the registration record, from another account, or from
-        // any hardcoded personal default — the registered email lives on the
-        // user record for authentication only.
-        const settings: SettingsRecord = {
-          _id: `set_${userId}`,
+        const newTrip: TripRecord = {
+          _id: `trp_${crypto.randomUUID()}`,
           userId,
-          appName: "",
-          transportationName: "",
-          currency: "INR",
-          defaultVehicleId: null,
-          fullName: "",
-          mobileNumber: "",
-          businessName: "",
-          address: "",
-          contactNumber: "",
-          businessEmail: "",
-          updatedAt: new Date().toISOString(),
+          vehicleId: targetVehicleId,
+          date: tripDate,
+          income: toAmount(body.income),
+          diesel: toAmount(body.diesel),
+          driverPayment: toAmount(body.driverPayment),
+          emiShare: toAmount(body.emiShare),
+          otherExpenseItems: items,
+          otherExpenses: sumItems(items),
+          notes: cleanString(body.notes, NOTES_MAX),
+          createdAt: now,
+          updatedAt: now,
         };
-        d.settings.push(settings);
-        return settings;
-      });
-      return successResponse(created);
+
+        await withDatabase((d) => {
+          d.trips.push(newTrip);
+        });
+        return successResponse(newTrip, 201);
+      }
     }
 
-    if (method === "PUT") {
-      const body = (await readJson(request)) as Partial<SettingsRecord>;
-      const updated = await withDatabase((d) => {
-        const current = d.settings.find((s) => s.userId === userId);
-        const unifiedName = (
-          body.transportationName ||
-          body.businessName ||
-          body.appName ||
-          current?.transportationName ||
-          current?.businessName ||
-          current?.appName ||
-          "Vehicle Calculation System"
-        ).trim();
+    if (path.startsWith("/api/trips/")) {
+      const tripId = path.replace("/api/trips/", "").split("/")[0];
 
-        let validDefaultVehicle = current?.defaultVehicleId ?? null;
-        if (body.defaultVehicleId !== undefined) {
-          if (body.defaultVehicleId === null || body.defaultVehicleId === "") {
-            validDefaultVehicle = null;
-          } else {
-            const owned = d.vehicles.find(
-              (v) => v._id === body.defaultVehicleId && v.userId === userId,
+      if (method === "GET") {
+        const found = db.trips.find((t) => t._id === tripId && t.userId === userId);
+        if (!found) return errorResponse("Trip not found", 404);
+        return successResponse(found);
+      }
+
+      if (method === "PUT") {
+        const body = (await readJson(request)) as Partial<TripRecord>;
+        const existingTrip = db.trips.find((t) => t._id === tripId && t.userId === userId);
+        if (!existingTrip) return errorResponse("Trip not found", 404);
+
+        if (body.vehicleId !== undefined) {
+          const newVehicleId = cleanString(body.vehicleId);
+          if (!newVehicleId) return errorResponse("Vehicle cannot be empty.", 400);
+          const owned = db.vehicles.find((v) => v._id === newVehicleId && v.userId === userId);
+          if (!owned) {
+            return errorResponse(
+              "Selected vehicle does not exist or does not belong to your account.",
+              403,
             );
-            validDefaultVehicle = owned ? owned._id : null;
           }
         }
 
-        const next: SettingsRecord = {
-          _id: current?._id || `set_${userId}`,
-          userId,
-          appName: unifiedName,
-          transportationName: unifiedName,
-          businessName: unifiedName,
-          currency: cleanString(body.currency, 10) || current?.currency || "INR",
-          defaultVehicleId: validDefaultVehicle,
-          // Missing fields resolve to this account's own saved value first and
-          // only then to an empty default — never to registration data or to
-          // another account's profile.
-          fullName: cleanString(body.fullName ?? current?.fullName ?? "", NAME_MAX),
-          mobileNumber: cleanString(body.mobileNumber ?? current?.mobileNumber ?? "", 20),
-          address: cleanString(body.address ?? current?.address ?? "", 500),
-          contactNumber: cleanString(body.contactNumber ?? current?.contactNumber ?? "", 20),
-          businessEmail: normalizeEmail(body.businessEmail ?? current?.businessEmail ?? ""),
-          updatedAt: new Date().toISOString(),
-        };
-
-        const index = d.settings.findIndex((s) => s.userId === userId);
-        if (index === -1) d.settings.push(next);
-        else d.settings[index] = next;
-        return next;
-      });
-      return successResponse(updated);
-    }
-  }
-
-  // 9. One-shot import of a client's legacy local records
-  if (path === "/api/sync" && method === "POST") {
-    const payload = (await readJson(request)) as {
-      vehicles?: VehicleRecord[];
-      trips?: TripRecord[];
-      settings?: Partial<SettingsRecord>;
-    };
-
-    const counts = await withDatabase((d) => {
-      let importedVehicles = 0;
-      let importedTrips = 0;
-
-      if (Array.isArray(payload.vehicles)) {
-        for (const v of payload.vehicles.slice(0, 5000)) {
-          const match = d.vehicles.find(
-            (ev) =>
-              ev.userId === userId &&
-              (ev._id === v._id ||
-                (ev.vehicleNumber && v.vehicleNumber && ev.vehicleNumber === v.vehicleNumber)),
+        if (body.date !== undefined && !isValidCalendarDate(body.date)) {
+          return errorResponse(
+            "Invalid trip date. Please provide a valid calendar date in YYYY-MM-DD format.",
+            400,
           );
-          if (match) continue;
-          d.vehicles.push({
-            _id: v._id || `veh_${crypto.randomUUID()}`,
-            userId,
-            name: cleanString(v.name),
-            type: cleanString(v.type) || "Truck",
-            model: cleanString(v.model),
-            vehicleNumber: cleanString(v.vehicleNumber),
-            notes: cleanString(v.notes, NOTES_MAX),
-            isActive: v.isActive ?? true,
-            createdAt: v.createdAt || new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          });
-          importedVehicles++;
         }
-      }
 
-      if (Array.isArray(payload.trips)) {
-        for (const t of payload.trips.slice(0, 20000)) {
-          const match = d.trips.find(
-            (et) =>
-              et.userId === userId &&
-              (et._id === t._id ||
-                (et.vehicleId === t.vehicleId && et.date === t.date && et.income === t.income)),
-          );
-          if (match) continue;
-          const items = normalizeExpenseItems(t.otherExpenseItems);
-          d.trips.push({
-            _id: t._id || `trp_${crypto.randomUUID()}`,
-            userId,
-            vehicleId: cleanString(t.vehicleId),
-            date: DATE_RE.test(String(t.date || ""))
-              ? String(t.date)
-              : new Date().toISOString().slice(0, 10),
-            income: toAmount(t.income),
-            diesel: toAmount(t.diesel),
-            driverPayment: toAmount(t.driverPayment),
-            emiShare: toAmount(t.emiShare),
+        if (
+          (body.income !== undefined && Number(body.income) < 0) ||
+          (body.diesel !== undefined && Number(body.diesel) < 0) ||
+          (body.driverPayment !== undefined && Number(body.driverPayment) < 0) ||
+          (body.emiShare !== undefined && Number(body.emiShare) < 0)
+        ) {
+          return errorResponse("Trip income and expense amounts cannot be negative.", 400);
+        }
+
+        const updated = await withDatabase((d) => {
+          const index = d.trips.findIndex((t) => t._id === tripId && t.userId === userId);
+          if (index === -1) return null;
+          const existing = d.trips[index];
+          if (!existing) return null;
+          const items =
+            body.otherExpenseItems !== undefined
+              ? normalizeExpenseItems(body.otherExpenseItems)
+              : existing.otherExpenseItems;
+          const next: TripRecord = {
+            _id: existing._id,
+            userId: existing.userId,
+            createdAt: existing.createdAt,
+            vehicleId:
+              body.vehicleId !== undefined ? cleanString(body.vehicleId) : existing.vehicleId,
+            date:
+              body.date !== undefined && isValidCalendarDate(body.date)
+                ? String(body.date)
+                : existing.date,
+            income: body.income !== undefined ? toAmount(body.income) : existing.income,
+            diesel: body.diesel !== undefined ? toAmount(body.diesel) : existing.diesel,
+            driverPayment:
+              body.driverPayment !== undefined
+                ? toAmount(body.driverPayment)
+                : existing.driverPayment,
+            emiShare: body.emiShare !== undefined ? toAmount(body.emiShare) : existing.emiShare,
             otherExpenseItems: items,
+            // Always derived from the items — one source of truth.
             otherExpenses: sumItems(items),
-            notes: cleanString(t.notes, NOTES_MAX),
-            createdAt: t.createdAt || new Date().toISOString(),
+            notes: body.notes !== undefined ? cleanString(body.notes, NOTES_MAX) : existing.notes,
             updatedAt: new Date().toISOString(),
-          });
-          importedTrips++;
+          };
+          d.trips[index] = next;
+          return next;
+        });
+        if (!updated) return errorResponse("Trip not found", 404);
+        return successResponse(updated);
+      }
+
+      if (method === "DELETE") {
+        const removed = await withDatabase((d) => {
+          const index = d.trips.findIndex((t) => t._id === tripId && t.userId === userId);
+          if (index === -1) return false;
+          d.trips.splice(index, 1);
+          return true;
+        });
+        if (!removed) return errorResponse("Trip not found", 404);
+        return successResponse({ _id: tripId });
+      }
+    }
+
+    // 8. Settings API
+    if (path === "/api/settings") {
+      if (method === "GET") {
+        const existing = db.settings.find((s) => s.userId === userId);
+        if (existing) return successResponse(existing);
+
+        const created = await withDatabase((d) => {
+          const found = d.settings.find((s) => s.userId === userId);
+          if (found) return found;
+          // A genuinely new account starts with a CLEAN profile. No full name,
+          // mobile, transport/business name, business email or address is ever
+          // derived from the registration record, from another account, or from
+          // any hardcoded personal default — the registered email lives on the
+          // user record for authentication only.
+          const settings: SettingsRecord = {
+            _id: `set_${userId}`,
+            userId,
+            appName: "",
+            transportationName: "",
+            currency: "INR",
+            defaultVehicleId: null,
+            fullName: "",
+            mobileNumber: "",
+            businessName: "",
+            address: "",
+            contactNumber: "",
+            businessEmail: "",
+            updatedAt: new Date().toISOString(),
+          };
+          d.settings.push(settings);
+          return settings;
+        });
+        return successResponse(created);
+      }
+
+      if (method === "PUT") {
+        const body = (await readJson(request)) as Partial<SettingsRecord>;
+        const updated = await withDatabase((d) => {
+          const current = d.settings.find((s) => s.userId === userId);
+          const unifiedName = (
+            body.transportationName ||
+            body.businessName ||
+            body.appName ||
+            current?.transportationName ||
+            current?.businessName ||
+            current?.appName ||
+            "Vehicle Calculation System"
+          ).trim();
+
+          let validDefaultVehicle = current?.defaultVehicleId ?? null;
+          if (body.defaultVehicleId !== undefined) {
+            if (body.defaultVehicleId === null || body.defaultVehicleId === "") {
+              validDefaultVehicle = null;
+            } else {
+              const owned = d.vehicles.find(
+                (v) => v._id === body.defaultVehicleId && v.userId === userId,
+              );
+              validDefaultVehicle = owned ? owned._id : null;
+            }
+          }
+
+          const next: SettingsRecord = {
+            _id: current?._id || `set_${userId}`,
+            userId,
+            appName: unifiedName,
+            transportationName: unifiedName,
+            businessName: unifiedName,
+            currency: cleanString(body.currency, 10) || current?.currency || "INR",
+            defaultVehicleId: validDefaultVehicle,
+            // Missing fields resolve to this account's own saved value first and
+            // only then to an empty default — never to registration data or to
+            // another account's profile.
+            fullName: cleanString(body.fullName ?? current?.fullName ?? "", NAME_MAX),
+            mobileNumber: cleanString(body.mobileNumber ?? current?.mobileNumber ?? "", 20),
+            address: cleanString(body.address ?? current?.address ?? "", 500),
+            contactNumber: cleanString(body.contactNumber ?? current?.contactNumber ?? "", 20),
+            businessEmail: normalizeEmail(body.businessEmail ?? current?.businessEmail ?? ""),
+            updatedAt: new Date().toISOString(),
+          };
+
+          const index = d.settings.findIndex((s) => s.userId === userId);
+          if (index === -1) d.settings.push(next);
+          else d.settings[index] = next;
+          return next;
+        });
+        return successResponse(updated);
+      }
+    }
+
+    // 9. One-shot import of a client's legacy local records
+    if (path === "/api/sync" && method === "POST") {
+      const payload = (await readJson(request)) as {
+        vehicles?: VehicleRecord[];
+        trips?: TripRecord[];
+        settings?: Partial<SettingsRecord>;
+      };
+
+      const counts = await withDatabase((d) => {
+        let importedVehicles = 0;
+        let importedTrips = 0;
+
+        if (Array.isArray(payload.vehicles)) {
+          for (const v of payload.vehicles.slice(0, 5000)) {
+            const match = d.vehicles.find(
+              (ev) =>
+                ev.userId === userId &&
+                (ev._id === v._id ||
+                  (ev.vehicleNumber && v.vehicleNumber && ev.vehicleNumber === v.vehicleNumber)),
+            );
+            if (match) continue;
+            d.vehicles.push({
+              _id: v._id || `veh_${crypto.randomUUID()}`,
+              userId,
+              name: cleanString(v.name),
+              type: cleanString(v.type) || "Truck",
+              model: cleanString(v.model),
+              vehicleNumber: cleanString(v.vehicleNumber),
+              notes: cleanString(v.notes, NOTES_MAX),
+              isActive: v.isActive ?? true,
+              createdAt: v.createdAt || new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            });
+            importedVehicles++;
+          }
         }
-      }
 
-      if (payload.settings) {
-        // Allowlisted fields only — a client cannot inject arbitrary keys.
-        const s = payload.settings;
-        const index = d.settings.findIndex((x) => x.userId === userId);
-        const current = index === -1 ? undefined : d.settings[index];
-        const unifiedName = cleanString(
-          s.transportationName || s.businessName || s.appName || current?.appName,
-          NAME_MAX,
-        );
-        const next: SettingsRecord = {
-          _id: current?._id || `set_${userId}`,
-          userId,
-          appName: unifiedName || current?.appName || "Vehicle Calculation System",
-          transportationName: unifiedName || current?.transportationName || "",
-          businessName: unifiedName || current?.businessName || "",
-          currency: cleanString(s.currency, 10) || current?.currency || "INR",
-          defaultVehicleId: s.defaultVehicleId ?? current?.defaultVehicleId ?? null,
-          fullName: cleanString(s.fullName ?? current?.fullName ?? "", NAME_MAX),
-          mobileNumber: cleanString(s.mobileNumber ?? current?.mobileNumber ?? "", 20),
-          address: cleanString(s.address ?? current?.address ?? "", 500),
-          contactNumber: cleanString(s.contactNumber ?? current?.contactNumber ?? "", 20),
-          businessEmail: normalizeEmail(s.businessEmail ?? current?.businessEmail ?? ""),
-          updatedAt: new Date().toISOString(),
-        };
-        if (index === -1) d.settings.push(next);
-        else d.settings[index] = next;
-      }
+        if (Array.isArray(payload.trips)) {
+          for (const t of payload.trips.slice(0, 20000)) {
+            const match = d.trips.find(
+              (et) =>
+                et.userId === userId &&
+                (et._id === t._id ||
+                  (et.vehicleId === t.vehicleId && et.date === t.date && et.income === t.income)),
+            );
+            if (match) continue;
+            const items = normalizeExpenseItems(t.otherExpenseItems);
+            d.trips.push({
+              _id: t._id || `trp_${crypto.randomUUID()}`,
+              userId,
+              vehicleId: cleanString(t.vehicleId),
+              date: DATE_RE.test(String(t.date || ""))
+                ? String(t.date)
+                : new Date().toISOString().slice(0, 10),
+              income: toAmount(t.income),
+              diesel: toAmount(t.diesel),
+              driverPayment: toAmount(t.driverPayment),
+              emiShare: toAmount(t.emiShare),
+              otherExpenseItems: items,
+              otherExpenses: sumItems(items),
+              notes: cleanString(t.notes, NOTES_MAX),
+              createdAt: t.createdAt || new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            });
+            importedTrips++;
+          }
+        }
 
-      return { importedVehicles, importedTrips };
-    });
+        if (payload.settings) {
+          // Allowlisted fields only — a client cannot inject arbitrary keys.
+          const s = payload.settings;
+          const index = d.settings.findIndex((x) => x.userId === userId);
+          const current = index === -1 ? undefined : d.settings[index];
+          const unifiedName = cleanString(
+            s.transportationName || s.businessName || s.appName || current?.appName,
+            NAME_MAX,
+          );
+          const next: SettingsRecord = {
+            _id: current?._id || `set_${userId}`,
+            userId,
+            appName: unifiedName || current?.appName || "Vehicle Calculation System",
+            transportationName: unifiedName || current?.transportationName || "",
+            businessName: unifiedName || current?.businessName || "",
+            currency: cleanString(s.currency, 10) || current?.currency || "INR",
+            defaultVehicleId: s.defaultVehicleId ?? current?.defaultVehicleId ?? null,
+            fullName: cleanString(s.fullName ?? current?.fullName ?? "", NAME_MAX),
+            mobileNumber: cleanString(s.mobileNumber ?? current?.mobileNumber ?? "", 20),
+            address: cleanString(s.address ?? current?.address ?? "", 500),
+            contactNumber: cleanString(s.contactNumber ?? current?.contactNumber ?? "", 20),
+            businessEmail: normalizeEmail(s.businessEmail ?? current?.businessEmail ?? ""),
+            updatedAt: new Date().toISOString(),
+          };
+          if (index === -1) d.settings.push(next);
+          else d.settings[index] = next;
+        }
 
-    return successResponse(counts);
+        return { importedVehicles, importedTrips };
+      });
+
+      return successResponse(counts);
+    }
+
+    return errorResponse("Not found", 404);
+  } catch (err) {
+    console.error(`[api] Error handling ${method} ${path}:`, err);
+    const msg = err instanceof Error ? err.message : "Internal server error";
+    return jsonResponse(
+      {
+        success: false,
+        message: msg,
+        error: { message: msg, status: 500 },
+      },
+      500,
+    );
   }
-
-  return errorResponse("Not found", 404);
 }
 
 function normalizeExpenseItems(raw: unknown): OtherExpenseItem[] {

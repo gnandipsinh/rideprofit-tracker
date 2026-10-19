@@ -36,11 +36,14 @@ let store: Store | null = null;
 let schemaReady: Promise<void> | null = null;
 
 function connectionString(): string {
-  // Clear precedence rule: DATABASE_URL > POSTGRES_URL > SUPABASE_DB_URL
+  // Precedence: DATABASE_URL > POSTGRES_URL > SUPABASE_DB_URL > POSTGRESQL_URL > PG_URL > PG_CONNECTION_STRING
   const url =
     process.env["DATABASE_URL"] ||
     process.env["POSTGRES_URL"] ||
     process.env["SUPABASE_DB_URL"] ||
+    process.env["POSTGRESQL_URL"] ||
+    process.env["PG_URL"] ||
+    process.env["PG_CONNECTION_STRING"] ||
     "";
   return url.trim();
 }

@@ -48,8 +48,24 @@ export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/api")) {
-      const { handleApiFetch } = await import("./server/api");
-      return handleApiFetch(request);
+      try {
+        const { handleApiFetch } = await import("./server/api");
+        return await handleApiFetch(request);
+      } catch (apiError) {
+        console.error("[server] API handling failure:", apiError);
+        const message = apiError instanceof Error ? apiError.message : "Internal API server error";
+        return new Response(
+          JSON.stringify({
+            success: false,
+            message,
+            error: { message, status: 500 },
+          }),
+          {
+            status: 500,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }
     }
 
     try {
