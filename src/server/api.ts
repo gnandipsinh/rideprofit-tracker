@@ -160,12 +160,19 @@ const TOKEN_SECRET_MIN = 32;
 function getTokenSecret(): string {
   if (cachedSecret) return cachedSecret;
 
-  const envSecret =
+  const rawSecret =
     process.env["TOKEN_SECRET"] ||
     process.env["JWT_SECRET"] ||
     process.env["SUPABASE_JWT_SECRET"] ||
     process.env["AUTH_SECRET"] ||
     process.env["SECRET_KEY"];
+
+  const envSecret = rawSecret
+    ? rawSecret
+        .trim()
+        .replace(/^["']|["']$/g, "")
+        .trim()
+    : "";
 
   if (isProductionServer()) {
     // Production must never fall back to a generated per-instance secret: on a
@@ -175,8 +182,8 @@ function getTokenSecret(): string {
     if (!envSecret || envSecret.length < TOKEN_SECRET_MIN) {
       throw new Error(
         `[config] TOKEN_SECRET must be set to at least ${TOKEN_SECRET_MIN} characters in production. ` +
-          "Generate one with: node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\" " +
-          "Set it in your deployment environment (never commit it).",
+          "Generate one with: node scripts/generate-secret.mjs (or npm run generate-secret). " +
+          "Then in Vercel, go to Settings → Environment Variables, add TOKEN_SECRET, select Production, save, and redeploy.",
       );
     }
     const lower = envSecret.toLowerCase();

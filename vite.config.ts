@@ -17,6 +17,16 @@ function apiMiddlewarePlugin(): Plugin {
     res: import("node:http").ServerResponse,
     next: () => void,
   ) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS");
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "X-Requested-With, Content-Type, Authorization, Accept, Origin",
+    );
+    if (req.method === "OPTIONS") {
+      res.statusCode = 204;
+      return res.end();
+    }
     if (req.url && req.url.startsWith("/api")) {
       const { handleApiNode } = await import("./src/server/api");
       return handleApiNode(req, res);
@@ -41,11 +51,23 @@ export default defineConfig({
     host: "0.0.0.0",
     port: 3000,
     allowedHosts: true,
+    cors: true,
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+      "Access-Control-Allow-Headers": "X-Requested-With, content-type, Authorization",
+    },
   },
   preview: {
     host: "0.0.0.0",
     port: 3000,
     allowedHosts: true,
+    cors: true,
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+      "Access-Control-Allow-Headers": "X-Requested-With, content-type, Authorization",
+    },
   },
   tanstackStart: {
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).

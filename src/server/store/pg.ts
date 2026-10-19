@@ -206,8 +206,14 @@ export class PgStore implements Store {
       // hosted Postgres (Supabase/Neon) but relaxed for local/dev.
       max: 5,
       idleTimeoutMillis: 30_000,
-      connectionTimeoutMillis: 10_000,
-      ssl: isProduction() ? { rejectUnauthorized: false } : undefined,
+      ssl:
+        isProduction() ||
+        connectionString.includes("supabase.co") ||
+        connectionString.includes("pooler.supabase.com") ||
+        connectionString.includes("neon.tech") ||
+        connectionString.includes("sslmode=require")
+          ? { rejectUnauthorized: false }
+          : undefined,
       application_name: "rideprofit-api",
     });
     this.pool.on("error", (err) => {

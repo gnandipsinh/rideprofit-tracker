@@ -37,7 +37,7 @@ let schemaReady: Promise<void> | null = null;
 
 function connectionString(): string {
   // Precedence: DATABASE_URL > POSTGRES_URL > SUPABASE_DB_URL > POSTGRESQL_URL > PG_URL > PG_CONNECTION_STRING
-  const url =
+  const raw =
     process.env["DATABASE_URL"] ||
     process.env["POSTGRES_URL"] ||
     process.env["SUPABASE_DB_URL"] ||
@@ -45,7 +45,10 @@ function connectionString(): string {
     process.env["PG_URL"] ||
     process.env["PG_CONNECTION_STRING"] ||
     "";
-  return url.trim();
+  return raw
+    .trim()
+    .replace(/^["']|["']$/g, "")
+    .trim();
 }
 
 function create(): Store {
@@ -59,7 +62,7 @@ function create(): Store {
         throw new Error(
           `[db] FATAL: Failed to initialize PostgreSQL store in production: ${
             err instanceof Error ? err.message : String(err)
-          }. Verify DATABASE_URL or POSTGRES_URL.`,
+          }. Verify DATABASE_URL (or POSTGRES_URL) in Vercel Project Settings → Environment Variables.`,
         );
       }
       console.warn("[db] Failed to instantiate PgStore, using JsonStore fallback:", err);
@@ -71,7 +74,7 @@ function create(): Store {
     throw new Error(
       "[config] FATAL: DATABASE_URL (or POSTGRES_URL) is required in production. " +
         "Production environments cannot use the local/in-memory JSON store because all data will be lost on container restart. " +
-        "Configure DATABASE_URL with your PostgreSQL connection string.",
+        "In Vercel, go to Settings → Environment Variables, add DATABASE_URL with your PostgreSQL connection string, select Production, save, and redeploy.",
     );
   }
 
