@@ -250,10 +250,21 @@ export class PgStore implements Store {
     };
   }
 
+  private readCache: DatabaseSchema | null = null;
+  private readCacheTime = 0;
+  private readonly CACHE_TTL_MS = 2500;
+
   async load(): Promise<DatabaseSchema> {
+    const now = Date.now();
+    if (this.readCache && now - this.readCacheTime < this.CACHE_TTL_MS) {
+      return this.readCache;
+    }
     const c = await this.pool.connect();
     try {
-      return await this.readAll(c);
+      const data = await this.readAll(c);
+      this.readCache = data;
+      this.readCacheTime = now;
+      return data;
     } finally {
       c.release();
     }
@@ -276,9 +287,11 @@ export class PgStore implements Store {
       const result = await mutator(working);
 
       await this.applyDiff(c, before, working);
+      this.readCache = null;
       await c.query("COMMIT");
       return result;
     } catch (e) {
+      this.readCache = null;
       await c.query("ROLLBACK").catch(() => undefined);
       throw e;
     } finally {

@@ -510,6 +510,22 @@ function parseBearerToken(authHeader: string | null): string {
   return authHeader.trim();
 }
 
+const authUserCache = new Map<string, { user: UserRecord; expiresAt: number }>();
+
+function invalidateAuthCache(tokenHash?: string, userId?: string): void {
+  if (tokenHash) {
+    authUserCache.delete(tokenHash);
+  } else if (userId) {
+    for (const [key, val] of authUserCache.entries()) {
+      if (val.user.id === userId) {
+        authUserCache.delete(key);
+      }
+    }
+  } else {
+    authUserCache.clear();
+  }
+}
+
 /**
  * Only HMAC-signed tokens are accepted AND still live in the session ledger.
  * Unsigned/forged tokens (including the retired `jwt_*` format) are rejected
@@ -517,13 +533,32 @@ function parseBearerToken(authHeader: string | null): string {
  */
 async function getAuthUserFromToken(token: string): Promise<UserRecord | null> {
   if (!token) return null;
+  const hash = sessionKey(token);
+  const now = Date.now();
+  const cached = authUserCache.get(hash);
+  if (cached && cached.expiresAt > now) {
+    return cached.user;
+  }
+
   try {
     const { userId, valid } = verifyToken(token, "access");
     if (!valid || !userId) return null;
     const store = await readyStore();
-    const active = await store.isSessionActive(sessionKey(token));
-    if (!active) return null;
-    return await store.getUser(userId);
+    const active = await store.isSessionActive(hash);
+    if (!active) {
+      authUserCache.delete(hash);
+      return null;
+    }
+    const user = await store.getUser(userId);
+    if (user) {
+      authUserCache.set(hash, { user, expiresAt: now + 30_000 });
+      if (authUserCache.size > 2000) {
+        for (const [k, v] of authUserCache) {
+          if (v.expiresAt <= now) authUserCache.delete(k);
+        }
+      }
+    }
+    return user;
   } catch (err) {
     console.warn("[auth] Session verification failed:", err instanceof Error ? err.message : err);
     return null;
@@ -950,6 +985,7 @@ export async function handleApiFetch(request: Request): Promise<Response> {
       }
       // A password reset means the old credentials may be compromised: revoke
       // every session for this user so any hijacked token stops working.
+      invalidateAuthCache(undefined, userId);
       await (await readyStore()).revokeAllSessions(userId);
       return successResponse({ message: "Password updated successfully." });
     }
@@ -960,6 +996,7 @@ export async function handleApiFetch(request: Request): Promise<Response> {
     if (path === "/api/auth/logout" && method === "POST") {
       const token = parseBearerToken(request.headers.get("authorization"));
       if (token) {
+        invalidateAuthCache(sessionKey(token));
         await (await readyStore()).revokeSession(sessionKey(token));
       }
       return successResponse({ message: "Signed out." });
