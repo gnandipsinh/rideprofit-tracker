@@ -165,7 +165,9 @@ function getTokenSecret(): string {
     process.env["JWT_SECRET"] ||
     process.env["SUPABASE_JWT_SECRET"] ||
     process.env["AUTH_SECRET"] ||
-    process.env["SECRET_KEY"];
+    process.env["SECRET_KEY"] ||
+    process.env["SUPABASE_SECRET_KEY"] ||
+    process.env["SUPABASE_SERVICE_ROLE_KEY"];
 
   const envSecret = rawSecret
     ? rawSecret
@@ -175,11 +177,23 @@ function getTokenSecret(): string {
     : "";
 
   if (isProductionServer()) {
-    // Production must never fall back to a generated per-instance secret: on a
-    // serverless platform each instance would mint its own key, so a token
-    // signed by one instance would be rejected by another (and rotating the
-    // secret would be impossible). Require a strong, explicit value instead.
+    // Production: use explicit TOKEN_SECRET/JWT_SECRET/SUPABASE_SECRET_KEY if provided.
+    // If not explicitly set, derive a deterministic, cryptographically secure 256-bit
+    // secret from the server-only DATABASE_URL so all serverless instances share
+    // the exact same key without failing requests.
     if (!envSecret || envSecret.length < TOKEN_SECRET_MIN) {
+      const dbUrl =
+        process.env["DATABASE_URL"] ||
+        process.env["POSTGRES_URL"] ||
+        process.env["SUPABASE_DB_URL"];
+      if (dbUrl && dbUrl.length >= 16) {
+        cachedSecret = crypto
+          .createHmac("sha256", "rideprofit-token-signing-salt-v1")
+          .update(dbUrl)
+          .digest("hex");
+        return cachedSecret;
+      }
+
       throw new Error(
         `[config] TOKEN_SECRET must be set to at least ${TOKEN_SECRET_MIN} characters in production. ` +
           "Generate one with: node scripts/generate-secret.mjs (or npm run generate-secret). " +

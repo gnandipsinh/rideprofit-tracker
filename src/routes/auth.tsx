@@ -336,10 +336,13 @@ function AuthPage() {
         password: parsed.data.password,
       });
       if (error) {
-        // Surface throttling clearly; everything else stays generic.
-        setFormError(
-          error.status === 429 ? safeAuthMessage(error.message) : GENERIC_CREDENTIALS_ERROR,
-        );
+        if (error.status === 429) {
+          setFormError(safeAuthMessage(error.message));
+        } else if (error.status === 401) {
+          setFormError(GENERIC_CREDENTIALS_ERROR);
+        } else {
+          setFormError(error.message || GENERIC_ERROR);
+        }
         return;
       }
       succeeded = true;
