@@ -12,6 +12,7 @@ import {
   LogOut,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PWAInstallButton } from "@/components/PWAInstallButton";
 import { supabase } from "@/integrations/supabase/client";
 import { useApp } from "@/lib/app-context";
 import { useHealth } from "@/lib/queries";
@@ -98,6 +99,7 @@ export function AppShell({
                 </Link>
               ))}
             </nav>
+            <PWAInstallButton />
             <Button
               type="button"
               variant="ghost"
