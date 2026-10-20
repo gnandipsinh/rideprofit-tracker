@@ -142,9 +142,18 @@ function RootComponent() {
 
   useEffect(() => {
     if (typeof window !== "undefined" && "serviceWorker" in navigator) {
-      window.addEventListener("load", () => {
-        navigator.serviceWorker.register("/sw.js").catch(() => undefined);
-      });
+      if (import.meta.env.PROD) {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+        });
+      } else {
+        // In development, ensure no active service worker intercepts Vite module imports
+        navigator.serviceWorker.getRegistrations().then((registrations) => {
+          for (const registration of registrations) {
+            registration.unregister().catch(() => undefined);
+          }
+        });
+      }
     }
 
     const { data } = supabase.auth.onAuthStateChange((event: string) => {

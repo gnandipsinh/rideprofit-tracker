@@ -1,5 +1,5 @@
 // RideProfit Tracker Service Worker
-const CACHE_NAME = "rideprofit-cache-v1";
+const CACHE_NAME = "rideprofit-cache-v2";
 const ASSETS_TO_CACHE = [
   "/",
   "/favicon.svg",
@@ -38,8 +38,16 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
 
-  // Network-only for API requests
-  if (url.pathname.startsWith("/api/")) {
+  // Never intercept dev modules, Vite client, source files, or backend API
+  if (
+    url.pathname.startsWith("/api/") ||
+    url.pathname.startsWith("/src/") ||
+    url.pathname.startsWith("/@") ||
+    url.pathname.startsWith("/node_modules/") ||
+    url.pathname.includes(".vite") ||
+    url.hostname === "localhost" ||
+    url.hostname.includes(".run.app")
+  ) {
     return;
   }
 
