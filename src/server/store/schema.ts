@@ -15,6 +15,12 @@
 export const SCHEMA_SQL = `
 CREATE SCHEMA IF NOT EXISTS rideprofit;
 
+CREATE TABLE IF NOT EXISTS rideprofit.schema_migrations (
+  version     TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  applied_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS rideprofit.users (
   id          TEXT PRIMARY KEY,
   email       TEXT NOT NULL,
@@ -53,11 +59,20 @@ CREATE TABLE IF NOT EXISTS rideprofit.trips (
   other_expenses      NUMERIC NOT NULL DEFAULT 0,
   notes               TEXT NOT NULL DEFAULT '',
   created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CONSTRAINT trips_amounts_non_negative CHECK (
-    income >= 0 AND diesel >= 0 AND driver_payment >= 0 AND emi_share >= 0 AND other_expenses >= 0
-  )
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'trips_amounts_non_negative'
+  ) THEN
+    ALTER TABLE rideprofit.trips ADD CONSTRAINT trips_amounts_non_negative CHECK (
+      income >= 0 AND diesel >= 0 AND driver_payment >= 0 AND emi_share >= 0 AND other_expenses >= 0
+    );
+  END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS trips_user_id_idx ON rideprofit.trips (user_id);
 CREATE INDEX IF NOT EXISTS trips_user_date_idx ON rideprofit.trips (user_id, date DESC);
 CREATE INDEX IF NOT EXISTS trips_vehicle_id_idx ON rideprofit.trips (vehicle_id);
@@ -77,6 +92,7 @@ CREATE TABLE IF NOT EXISTS rideprofit.settings (
   business_email      TEXT NOT NULL DEFAULT '',
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE INDEX IF NOT EXISTS settings_user_id_idx ON rideprofit.settings (user_id);
 
 CREATE TABLE IF NOT EXISTS rideprofit.pending_codes (
   token      TEXT NOT NULL,
@@ -112,4 +128,17 @@ CREATE TABLE IF NOT EXISTS rideprofit.rate_limits (
   count     INTEGER NOT NULL DEFAULT 0,
   reset_at  BIGINT NOT NULL
 );
+
+INSERT INTO rideprofit.schema_migrations (version, name)
+VALUES ('20261019120000', 'rideprofit_schema_setup')
+ON CONFLICT (version) DO NOTHING;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+    GRANT USAGE ON SCHEMA rideprofit TO anon, authenticated, service_role;
+    GRANT ALL ON ALL TABLES IN SCHEMA rideprofit TO anon, authenticated, service_role;
+    GRANT ALL ON ALL SEQUENCES IN SCHEMA rideprofit TO anon, authenticated, service_role;
+  END IF;
+END $$;
 `;

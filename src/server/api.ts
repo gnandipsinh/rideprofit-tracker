@@ -380,6 +380,9 @@ async function takeRateLimit(
   max: number,
   windowMs: number,
 ): Promise<{ ok: boolean; retryAfter: number }> {
+  if (!isProductionServer() && (key.endsWith(":local") || key.includes(":local:"))) {
+    return { ok: true, retryAfter: 0 };
+  }
   return (await readyStore()).takeRateLimit(key, max, windowMs);
 }
 
@@ -675,8 +678,8 @@ export async function handleApiFetch(request: Request): Promise<Response> {
       const passwordError = validatePassword(password);
       if (passwordError) return errorResponse(passwordError, 400);
 
-      const fullName = cleanString(body["fullName"], NAME_MAX);
-      const mobile = cleanString(body["mobile"], 20);
+      const fullName = cleanString(body["fullName"] ?? body["full_name"], NAME_MAX);
+      const mobile = cleanString(body["mobile"] ?? body["mobile_number"], 20);
       if (fullName.length < 2) return errorResponse("Enter your full name.", 400);
       if (!/^[6-9]\d{9}$/.test(mobile))
         return errorResponse("Enter a valid 10-digit mobile number.", 400);
@@ -684,21 +687,30 @@ export async function handleApiFetch(request: Request): Promise<Response> {
       const hashedPassword = await hashPassword(password as string);
       const userId = `usr_${crypto.randomUUID()}`;
 
-      const created = await withDatabase((db) => {
-        if (db.users.some((u) => u.email.toLowerCase() === email)) {
-          return null;
+      let created: UserRecord | null = null;
+      try {
+        created = await withDatabase((db) => {
+          if (db.users.some((u) => u.email.toLowerCase() === email)) {
+            return null;
+          }
+          const newUser: UserRecord = {
+            id: userId,
+            email,
+            password: hashedPassword,
+            fullName,
+            mobile,
+            createdAt: new Date().toISOString(),
+          };
+          db.users.push(newUser);
+          return newUser;
+        });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (message.includes("users_email_unique_idx") || message.includes("23505")) {
+          return errorResponse("An account with this email already exists.", 400);
         }
-        const newUser: UserRecord = {
-          id: userId,
-          email,
-          password: hashedPassword,
-          fullName,
-          mobile,
-          createdAt: new Date().toISOString(),
-        };
-        db.users.push(newUser);
-        return newUser;
-      });
+        throw err;
+      }
 
       if (!created) {
         return errorResponse("An account with this email already exists.", 400);

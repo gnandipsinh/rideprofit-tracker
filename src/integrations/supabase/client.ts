@@ -30,6 +30,16 @@ const RESET_TOKEN_STORAGE_KEY = "vcs.auth.password_reset_token";
 
 const DEFAULT_EXPIRES_IN = 3600 * 24 * 30; // 30 days
 
+function authUrl(path: string): string {
+  const envUrl =
+    (typeof import.meta !== "undefined" && import.meta.env
+      ? (import.meta.env["VITE_API_URL"] as string | undefined)
+      : undefined) ||
+    (typeof process !== "undefined" && process?.env ? process.env["VITE_API_URL"] : undefined);
+  if (envUrl) return `${envUrl.trim().replace(/\/+$/, "")}${path}`;
+  return path;
+}
+
 type CodePurpose = "login" | "reset";
 
 interface ApiSessionPayload {
@@ -134,7 +144,7 @@ async function requestEmailCode(
   error: AuthError | null;
 }> {
   try {
-    const res = await fetch("/api/auth/email-code", {
+    const res = await fetch(authUrl("/api/auth/email-code"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, purpose }),
@@ -178,7 +188,7 @@ async function verifyCodeAndSignIn(
   error: AuthError | null;
 }> {
   try {
-    const res = await fetch("/api/auth/verify-code", {
+    const res = await fetch(authUrl("/api/auth/verify-code"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, code, purpose }),
@@ -242,7 +252,7 @@ function createProductionAuth() {
       const mobile = typeof meta["mobile"] === "string" ? (meta["mobile"] as string).trim() : "";
 
       try {
-        const res = await fetch("/api/auth/register", {
+        const res = await fetch(authUrl("/api/auth/register"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ email: normEmail, password, fullName, mobile }),
@@ -277,7 +287,7 @@ function createProductionAuth() {
       const normEmail = email.trim().toLowerCase();
 
       try {
-        const res = await fetch("/api/auth/login", {
+        const res = await fetch(authUrl("/api/auth/login"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ email: normEmail, password }),
@@ -328,7 +338,7 @@ function createProductionAuth() {
     /** Verifies the 6-digit reset code and stores the short-lived reset token. */
     async verifyResetCode({ email, code }: { email: string; code: string }) {
       try {
-        const res = await fetch("/api/auth/verify-code", {
+        const res = await fetch(authUrl("/api/auth/verify-code"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ email, code, purpose: "reset" }),
@@ -383,7 +393,7 @@ function createProductionAuth() {
 
       try {
         if (targetUser) {
-          const res = await fetch("/api/auth/update", {
+          const res = await fetch(authUrl("/api/auth/update"), {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -425,7 +435,7 @@ function createProductionAuth() {
               error: { message: "Your reset code expired. Request a new one.", status: 401 },
             };
           }
-          const res = await fetch("/api/auth/reset-password", {
+          const res = await fetch(authUrl("/api/auth/reset-password"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ email: resetEmail, resetToken, newPassword: password }),
@@ -466,7 +476,7 @@ function createProductionAuth() {
         const session = loadActiveSession();
         const token = session?.access_token;
         if (token) {
-          await fetch("/api/auth/logout", {
+          await fetch(authUrl("/api/auth/logout"), {
             method: "POST",
             headers: { Authorization: `Bearer ${token}` },
           });
@@ -552,10 +562,10 @@ function createSupabaseClient() {
       ? process.env["SUPABASE_PUBLISHABLE_KEY"]
       : undefined);
 
+  const localAuth = createProductionAuth();
   const useLocal = isDummySupabaseUrl(SUPABASE_URL) || !SUPABASE_PUBLISHABLE_KEY;
 
   if (useLocal) {
-    const localAuth = createProductionAuth();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const builder: any = {
       select: () => builder,
@@ -579,11 +589,24 @@ function createSupabaseClient() {
     } as any;
   }
 
-  return createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+  const client = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
     auth: {
       storage: brokeredPreviewStorage(),
       persistSession: true,
       autoRefreshToken: true,
+    },
+  });
+
+  // Always bind the application's production authentication facade to client.auth
+  // so registration, sessions, and credentials consistently route through the PostgreSQL
+  // backend and TOKEN_SECRET HMAC tokens without split-brain or email-confirmation stalls.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return new Proxy(client as any, {
+    get(target, prop, receiver) {
+      if (prop === "auth") {
+        return localAuth;
+      }
+      return Reflect.get(target, prop, receiver);
     },
   });
 }

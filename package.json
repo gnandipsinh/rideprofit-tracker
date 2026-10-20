@@ -9,7 +9,7 @@
     "build:dev": "vite build --mode development",
     "start": "node .output/server/index.mjs",
     "preview": "vite preview --host 0.0.0.0 --port 3000",
-    "test": "node scripts/financial-calc-test.mjs",
+    "test": "node scripts/financial-calc-test.mjs && npx tsx scripts/registration-repair-test.mjs && npx tsx scripts/database-audit-and-verification.mjs",
     "generate-secret": "node scripts/generate-secret.mjs",
     "lint": "eslint .",
     "format": "prettier --write ."

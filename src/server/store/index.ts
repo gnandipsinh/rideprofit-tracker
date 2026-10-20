@@ -35,6 +35,36 @@ function isProduction(): boolean {
 let store: Store | null = null;
 let schemaReady: Promise<void> | null = null;
 
+export function normalizePostgresUrl(rawUrl: string): string {
+  const url = rawUrl
+    .trim()
+    .replace(/^["']|["']$/g, "")
+    .trim();
+  if (!url) return "";
+
+  const protoMatch = url.match(/^(postgres(?:ql)?:\/\/)(.*)$/);
+  if (!protoMatch) return url;
+
+  const [, proto, rest] = protoMatch;
+  const lastAtIdx = rest.lastIndexOf("@");
+  if (lastAtIdx === -1) return url;
+
+  const creds = rest.slice(0, lastAtIdx);
+  const hostAndRest = rest.slice(lastAtIdx + 1);
+
+  const colonIdx = creds.indexOf(":");
+  if (colonIdx === -1) return url;
+
+  const user = creds.slice(0, colonIdx);
+  const pass = creds.slice(colonIdx + 1);
+
+  // Encode unencoded special characters (@, #, ?, /, [, ], space) that break URI parsing
+  const safeEncode = (s: string) => s.replace(/[@#?/[\]\s]/g, (c) => encodeURIComponent(c));
+  const safeUser = safeEncode(user);
+  const safePass = safeEncode(pass);
+  return `${proto}${safeUser}:${safePass}@${hostAndRest}`;
+}
+
 function connectionString(): string {
   // Precedence: DATABASE_URL > POSTGRES_URL > SUPABASE_DB_URL > POSTGRESQL_URL > PG_URL > PG_CONNECTION_STRING
   const raw =
@@ -45,10 +75,7 @@ function connectionString(): string {
     process.env["PG_URL"] ||
     process.env["PG_CONNECTION_STRING"] ||
     "";
-  return raw
-    .trim()
-    .replace(/^["']|["']$/g, "")
-    .trim();
+  return normalizePostgresUrl(raw);
 }
 
 function create(): Store {

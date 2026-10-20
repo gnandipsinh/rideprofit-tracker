@@ -206,6 +206,8 @@ export class PgStore implements Store {
       // hosted Postgres (Supabase/Neon) but relaxed for local/dev.
       max: 5,
       idleTimeoutMillis: 30_000,
+      connectionTimeoutMillis: 5_000,
+      statement_timeout: 15_000,
       ssl:
         isProduction() ||
         connectionString.includes("supabase.co") ||
@@ -227,21 +229,24 @@ export class PgStore implements Store {
   }
 
   private async readAll(c: PoolClient): Promise<DatabaseSchema> {
-    const [users, vehicles, trips, settings, pending, consumed] = await Promise.all([
-      c.query("SELECT id, email, password, full_name, mobile, created_at FROM rideprofit.users"),
-      c.query("SELECT * FROM rideprofit.vehicles"),
-      c.query("SELECT * FROM rideprofit.trips"),
-      c.query("SELECT * FROM rideprofit.settings"),
-      c.query("SELECT * FROM rideprofit.pending_codes"),
-      c.query("SELECT * FROM rideprofit.consumed_reset_tokens"),
-    ]);
+    // Execute sequentially to prevent pipelined query collisions on a single client
+    const users = await c.query<UserRow>(
+      "SELECT id, email, password, full_name, mobile, created_at FROM rideprofit.users",
+    );
+    const vehicles = await c.query<VehicleRow>("SELECT * FROM rideprofit.vehicles");
+    const trips = await c.query<TripRow>("SELECT * FROM rideprofit.trips");
+    const settings = await c.query<SettingsRow>("SELECT * FROM rideprofit.settings");
+    const pending = await c.query<PendingTokenRow>("SELECT * FROM rideprofit.pending_codes");
+    const consumed = await c.query<ConsumedTokenRow>(
+      "SELECT * FROM rideprofit.consumed_reset_tokens",
+    );
     return {
-      users: (users.rows as UserRow[]).map(rowToUser),
-      vehicles: (vehicles.rows as VehicleRow[]).map(rowToVehicle),
-      trips: (trips.rows as TripRow[]).map(rowToTrip),
-      settings: (settings.rows as SettingsRow[]).map(rowToSettings),
-      pendingTokens: (pending.rows as PendingTokenRow[]).map(rowToPendingToken),
-      consumedResetTokens: (consumed.rows as ConsumedTokenRow[]).map(rowToConsumed),
+      users: users.rows.map(rowToUser),
+      vehicles: vehicles.rows.map(rowToVehicle),
+      trips: trips.rows.map(rowToTrip),
+      settings: settings.rows.map(rowToSettings),
+      pendingTokens: pending.rows.map(rowToPendingToken),
+      consumedResetTokens: consumed.rows.map(rowToConsumed),
     };
   }
 
@@ -304,7 +309,10 @@ export class PgStore implements Store {
       if (!prev) {
         await c.query(
           `INSERT INTO rideprofit.users (id, email, password, full_name, mobile, created_at)
-           VALUES ($1,$2,$3,$4,$5,$6)`,
+           VALUES ($1,$2,$3,$4,$5,$6)
+           ON CONFLICT (id) DO UPDATE SET
+             email=EXCLUDED.email, password=EXCLUDED.password,
+             full_name=EXCLUDED.full_name, mobile=EXCLUDED.mobile`,
           [u.id, u.email, u.password ?? null, u.fullName, u.mobile, u.createdAt],
         );
       } else if (JSON.stringify(prev) !== JSON.stringify(u)) {
