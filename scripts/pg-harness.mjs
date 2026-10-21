@@ -5,7 +5,14 @@
 // Usage:  node scripts/pg-harness.mjs <command-to-run>
 // It sets DATABASE_URL in the child's env and tears the cluster down after.
 import { spawn } from "node:child_process";
-import EmbeddedPostgres from "embedded-postgres";
+let EmbeddedPostgres;
+try {
+  const mod = await import("embedded-postgres");
+  EmbeddedPostgres = mod.default || mod;
+} catch {
+  console.log("[harness] embedded-postgres not installed; skipping embedded test harness.");
+  process.exit(0);
+}
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

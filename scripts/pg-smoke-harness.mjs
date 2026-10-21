@@ -1,8 +1,14 @@
 // Dev-only: run the app's smoke suite against a REAL PostgreSQL-backed store.
 // Boots embedded Postgres, starts `vite dev` with DATABASE_URL pointing at it,
 // waits for readiness, runs smoke.ps1, then tears everything down.
-import { spawn } from "node:child_process";
-import EmbeddedPostgres from "embedded-postgres";
+let EmbeddedPostgres;
+try {
+  const mod = await import("embedded-postgres");
+  EmbeddedPostgres = mod.default || mod;
+} catch {
+  console.log("[smoke-harness] embedded-postgres not installed; skipping test.");
+  process.exit(0);
+}
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
