@@ -1,0 +1,5 @@
+{
+  "name": "Eicher Calculation",
+  "description": "Vehicle-wise trip accounting and profit calculation system with multi-vehicle tracking, expense management, and PDF reports.",
+  "capabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
