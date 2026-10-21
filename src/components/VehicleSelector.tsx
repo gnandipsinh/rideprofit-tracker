@@ -17,23 +17,21 @@ export function VehicleSelector({ includeAll = true }: { includeAll?: boolean })
   }
 
   return (
-    <div className="glass-card rounded-2xl p-3 sm:p-4 sm:grid sm:grid-cols-[minmax(0,1fr)_minmax(15rem,0.9fr)] sm:items-center sm:gap-4">
+    <div className="glass-card rounded-2xl p-3 sm:p-4 sm:grid sm:grid-cols-[minmax(0,1fr)_minmax(15rem,0.9fr)] sm:items-center sm:gap-4 border border-cyan-500/15">
       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
         <div className="min-w-0">
-          <p className="text-[0.68rem] font-bold uppercase tracking-[0.18em] text-primary">
+          <p className="text-[0.68rem] font-bold uppercase tracking-[0.18em] text-cyan-400">
             Selected Vehicle
           </p>
-          <p className="truncate text-xs sm:text-sm font-semibold text-foreground/90">
-            {selectedLabel}
-          </p>
+          <p className="truncate text-xs sm:text-sm font-semibold text-white">{selectedLabel}</p>
         </div>
-        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary/15 text-primary shadow-[var(--shadow-gold)] ring-1 ring-primary/30">
+        <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-cyan-500/15 text-cyan-400 ring-1 ring-cyan-500/30 shadow-[0_0_12px_rgba(6,182,212,0.2)]">
           <Truck className="h-4 w-4" />
         </div>
       </div>
 
       <Select value={selectedVehicleId} onValueChange={setSelectedVehicleId}>
-        <SelectTrigger className="mt-2.5 sm:mt-0 h-11 w-full rounded-xl border-input bg-secondary/60 text-sm font-semibold">
+        <SelectTrigger className="mt-2.5 sm:mt-0 h-11 w-full rounded-xl border border-slate-800 bg-slate-900/80 hover:border-cyan-500/40 text-sm font-semibold text-white">
           <SelectValue placeholder="Select a vehicle" />
         </SelectTrigger>
         <SelectContent className="max-h-72">

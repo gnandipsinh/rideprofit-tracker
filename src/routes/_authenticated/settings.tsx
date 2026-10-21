@@ -180,9 +180,9 @@ function SettingsPage() {
         window.localStorage.removeItem("vcs.selectedVehicleId");
         window.localStorage.removeItem("SELECTED_KEY");
       }
-      navigate({ to: "/auth", replace: true });
+      navigate({ to: "/landing", replace: true });
     } catch {
-      navigate({ to: "/auth", replace: true });
+      navigate({ to: "/landing", replace: true });
     }
   };
 

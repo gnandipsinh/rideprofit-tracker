@@ -321,6 +321,44 @@ function createProductionAuth() {
     },
 
     /**
+     * Instantly signs into the demo account with pre-seeded fleet & trips data.
+     */
+    async signInAsDemo() {
+      try {
+        const res = await fetch(authUrl("/api/auth/demo"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        });
+        const json = await res.json().catch(() => null);
+        if (res.ok && json?.data?.user && json?.data?.session) {
+          const meta = {
+            full_name: json.data.user.fullName,
+            mobile: json.data.user.mobile,
+          };
+          const session = buildSession(json.data.session, meta);
+          saveActiveSession(session);
+          notifySubscribers("SIGNED_IN", session);
+          return { data: { user: session.user, session }, error: null };
+        }
+        return {
+          data: { user: null, session: null },
+          error: {
+            message: json?.error?.message || json?.message || "Failed to start demo session.",
+            status: res.status,
+          },
+        };
+      } catch (e) {
+        return {
+          data: { user: null, session: null },
+          error: {
+            message: e instanceof Error ? e.message : "Failed to connect to backend database.",
+            status: 500,
+          },
+        };
+      }
+    },
+
+    /**
      * Requests a 6-digit verification code by email.
      * The response never reveals whether the account exists.
      */

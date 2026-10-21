@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import {
   Eye,
   EyeOff,
@@ -34,6 +34,9 @@ import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/auth")({
   ssr: false,
+  validateSearch: (search: Record<string, unknown>) => ({
+    mode: typeof search.mode === "string" ? search.mode : undefined,
+  }),
   head: () => ({
     meta: [
       { title: "Vehicle Calculation System — Fleet Accounting" },
@@ -150,7 +153,13 @@ function Field({
 function AuthPage() {
   const navigate = useNavigate();
 
-  const [step, setStep] = useState<Step>("login");
+  const [step, setStep] = useState<Step>(() => {
+    if (typeof window !== "undefined") {
+      const mode = new URLSearchParams(window.location.search).get("mode");
+      if (mode === "register") return "register";
+    }
+    return "login";
+  });
   const [busy, setBusy] = useState(false);
   const requestInFlight = useRef(false);
   const [errors, setErrors] = useState<Errors>({});
@@ -479,19 +488,29 @@ function AuthPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4 py-8 pb-[env(safe-area-inset-bottom)] sm:px-6 lg:px-8">
       <div className="w-full max-w-md lg:max-w-[30rem]">
+        <div className="mb-4 flex items-center justify-between">
+          <Link
+            to="/landing"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-cyan-400 hover:text-cyan-300 transition-colors hover:underline"
+          >
+            ← View RideProfit Landing Page
+          </Link>
+        </div>
+
         <div className="mb-6 flex flex-col items-center text-center">
-          <div className="grid h-16 w-16 place-items-center rounded-3xl bg-primary/15 text-primary shadow-[var(--shadow-gold)] ring-1 ring-primary/35">
+          <div className="grid h-16 w-16 place-items-center rounded-3xl bg-cyan-500/15 text-cyan-400 shadow-[0_0_25px_rgba(6,182,212,0.4)] ring-1 ring-cyan-400/40">
             <Truck className="h-7 w-7" />
           </div>
-          <h1 className="mt-4 text-2xl font-extrabold tracking-tight sm:text-3xl">
-            Vehicle Calculation System
+          <h1 className="mt-4 text-2xl font-extrabold tracking-tight sm:text-3xl text-white flex items-center justify-center">
+            RideProfit
+            <span className="ml-1.5 inline-block h-2 w-2 rounded-full bg-cyan-400 shadow-[0_0_8px_#22d3ee]" />
           </h1>
-          <p className="mt-1 text-[0.65rem] font-bold uppercase tracking-[0.3em] text-primary/85">
-            Fleet Accounting
+          <p className="mt-1 text-[0.65rem] font-bold uppercase tracking-[0.3em] text-cyan-400/90">
+            Tracker
           </p>
         </div>
 
-        <div className="fleet-panel rounded-3xl p-5 backdrop-blur-xl sm:p-7">
+        <div className="fleet-panel rounded-3xl p-5 backdrop-blur-xl sm:p-7 border border-cyan-500/25 shadow-2xl">
           <div className="mb-5">
             <h2 className="text-xl font-extrabold">{heading[step].title}</h2>
             <p className="mt-1 text-sm text-muted-foreground">{heading[step].sub}</p>
@@ -728,7 +747,7 @@ function AuthPage() {
               </div>
 
               {codeNotice ? (
-                <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-600 dark:text-amber-400">
+                <div className="rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-3 py-2 text-xs font-medium text-cyan-300">
                   {codeNotice}
                 </div>
               ) : null}

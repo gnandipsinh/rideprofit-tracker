@@ -336,7 +336,7 @@ function ReportsPage() {
           {filteredReport && filteredReport.rows.length > 0 ? (
             <Button
               onClick={() => setPreviewOpen(true)}
-              className="h-10 sm:h-11 rounded-xl px-3.5 sm:px-5 font-bold shadow-[var(--shadow-gold)] bg-primary text-primary-foreground hover:bg-primary/90 tap-scale shrink-0 text-xs sm:text-sm"
+              className="h-10 sm:h-11 rounded-xl px-3.5 sm:px-5 font-bold shadow-[0_4px_20px_-2px_rgba(6,182,212,0.45)] bg-gradient-to-r from-cyan-500 to-blue-600 text-white hover:from-cyan-400 hover:to-blue-500 tap-scale shrink-0 text-xs sm:text-sm"
             >
               <FileSpreadsheet className="mr-1.5 h-4 w-4" />
               <span>Generate PDF</span>
@@ -457,7 +457,7 @@ function ReportsPage() {
               type="button"
               size="sm"
               onClick={handleApplyFilter}
-              className="h-9 sm:h-10 rounded-xl px-4 text-xs font-bold bg-primary text-primary-foreground hover:bg-primary/90 shadow-[var(--shadow-gold)] tap-scale"
+              className="h-9 sm:h-10 rounded-xl px-4 text-xs font-bold bg-gradient-to-r from-cyan-500 to-blue-600 text-white hover:from-cyan-400 hover:to-blue-500 shadow-[0_4px_20px_-2px_rgba(6,182,212,0.45)] tap-scale"
             >
               <Filter className="mr-1.5 h-3.5 w-3.5" />
               Apply Filter
@@ -627,7 +627,7 @@ function ReportsPage() {
                   <span className="text-[0.68rem] font-bold uppercase tracking-wider">
                     Total EMI
                   </span>
-                  <Wallet className="h-4 w-4 text-amber-400" />
+                  <Wallet className="h-4 w-4 text-purple-400" />
                 </div>
                 <div className="mt-2">
                   <p className="text-base sm:text-xl font-extrabold text-foreground tabular-nums">
@@ -1291,7 +1291,7 @@ function ReportsPage() {
                 size="sm"
                 disabled={generatingPdf}
                 onClick={handleDownloadPdf}
-                className="rounded-xl h-10 px-5 text-xs font-bold bg-primary text-primary-foreground hover:bg-primary/90 shadow-[var(--shadow-gold)] tap-scale"
+                className="rounded-xl h-10 px-5 text-xs font-bold bg-gradient-to-r from-cyan-500 to-blue-600 text-white hover:from-cyan-400 hover:to-blue-500 shadow-[0_4px_20px_-2px_rgba(6,182,212,0.45)] tap-scale"
               >
                 <Download className="mr-1.5 h-3.5 w-3.5" />
                 {generatingPdf ? "Generating..." : "Download PDF"}

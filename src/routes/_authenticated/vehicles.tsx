@@ -314,7 +314,7 @@ function VehiclesPage() {
                         className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border/50 pt-3"
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <Badge variant="gold" className="min-w-0 max-w-full truncate">
+                        <Badge variant="default" className="min-w-0 max-w-full truncate">
                           {v.type}
                         </Badge>
                         <div className="ml-auto flex shrink-0 gap-1">

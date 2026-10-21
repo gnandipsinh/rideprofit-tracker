@@ -170,8 +170,8 @@ export function DashboardPage() {
                 className={cn(
                   "tap-scale shrink-0 min-h-[38px] sm:min-h-[42px] rounded-full border border-border px-3.5 sm:px-4 py-1.5 text-xs font-semibold text-muted-foreground transition-all",
                   preset === p.value
-                    ? "border-primary/50 bg-primary/15 text-primary shadow-[var(--shadow-gold)] font-bold"
-                    : "hover:bg-secondary/60 hover:text-foreground",
+                    ? "border-cyan-500/50 bg-gradient-to-r from-purple-600/30 to-cyan-500/30 text-white shadow-[0_0_15px_rgba(6,182,212,0.3)] font-bold ring-1 ring-cyan-400/40"
+                    : "hover:bg-slate-800/60 hover:text-white",
                 )}
               >
                 {p.label}

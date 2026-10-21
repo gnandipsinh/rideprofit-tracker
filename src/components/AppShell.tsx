@@ -50,7 +50,7 @@ export function AppShell({
       queryClient.clear();
       await supabase.auth.signOut();
       if (typeof window !== "undefined") window.localStorage.removeItem("vcs.selectedVehicleId");
-      await navigate({ to: "/auth", replace: true });
+      await navigate({ to: "/landing", replace: true });
     } finally {
       setSigningOut(false);
     }
@@ -71,29 +71,30 @@ export function AppShell({
       >
         <div className="app-container grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2.5 py-2.5 sm:py-3 md:py-4">
           <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
-            <div className="grid h-10 w-10 sm:h-11 sm:w-11 shrink-0 place-items-center rounded-2xl bg-primary/15 text-primary shadow-[var(--shadow-gold)] ring-1 ring-primary/35">
+            <div className="grid h-10 w-10 sm:h-11 sm:w-11 shrink-0 place-items-center rounded-2xl bg-cyan-500/15 text-cyan-400 shadow-[0_0_20px_rgba(6,182,212,0.35)] ring-1 ring-cyan-400/35">
               <Truck className="h-5 w-5 sm:h-6 sm:w-6" />
             </div>
             <div className="min-w-0">
-              <h1 className="truncate text-sm sm:text-base md:text-xl font-extrabold leading-tight">
-                {appName}
+              <h1 className="truncate text-sm sm:text-base md:text-xl font-extrabold leading-tight text-white flex items-center">
+                RideProfit
+                <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-cyan-400 shadow-[0_0_6px_#22d3ee]" />
               </h1>
-              <p className="truncate text-[0.62rem] sm:text-[0.65rem] font-bold uppercase tracking-[0.24em] sm:tracking-[0.28em] text-primary/85">
-                Fleet Accounting
+              <p className="truncate text-[0.62rem] sm:text-[0.65rem] font-bold uppercase tracking-[0.24em] sm:tracking-[0.28em] text-cyan-400/90 -mt-0.5">
+                Tracker
               </p>
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            <nav className="hidden shrink-0 items-center gap-1 md:flex">
+            <nav className="hidden shrink-0 items-center gap-1 md:flex rounded-full border border-slate-800/80 bg-slate-900/60 p-1 backdrop-blur-md">
               {NAV.map((item) => (
                 <Link
                   key={item.to}
                   to={item.to}
                   className={cn(
-                    "tap-scale rounded-xl px-3 py-2 text-xs font-semibold transition-all duration-200",
+                    "tap-scale rounded-xl px-3.5 py-1.5 text-xs font-semibold transition-all duration-200",
                     pathname === item.to
-                      ? "bg-primary/15 text-primary shadow-sm ring-1 ring-primary/30"
-                      : "text-muted-foreground hover:bg-secondary/70 hover:text-foreground",
+                      ? "bg-gradient-to-r from-purple-600/30 to-cyan-500/30 text-white shadow-[0_0_15px_rgba(6,182,212,0.3)] ring-1 ring-cyan-400/40"
+                      : "text-slate-400 hover:bg-slate-800/60 hover:text-white",
                   )}
                 >
                   {item.label}
@@ -107,14 +108,14 @@ export function AppShell({
               size="sm"
               disabled={signingOut}
               onClick={handleSignOut}
-              className="tap-scale gap-1.5 rounded-xl text-muted-foreground hover:text-foreground"
+              className="tap-scale gap-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800/60"
             >
               <LogOut className="h-4 w-4" />
               <span className="hidden sm:inline">Sign out</span>
             </Button>
           </div>
         </div>
-        <div className="h-px w-full gold-rule opacity-30" />
+        <div className="h-px w-full bg-gradient-to-r from-transparent via-cyan-500/30 to-transparent" />
       </header>
 
       {offline && !dismissed ? (
@@ -168,8 +169,8 @@ export function AppShell({
                 className={cn(
                   "tap-scale flex flex-col items-center justify-center gap-1 rounded-2xl py-1.5 text-center transition-all duration-200",
                   active
-                    ? "bg-primary/15 text-primary shadow-sm ring-1 ring-primary/30"
-                    : "text-muted-foreground hover:text-foreground",
+                    ? "bg-cyan-500/15 text-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.3)] ring-1 ring-cyan-400/40"
+                    : "text-slate-400 hover:text-white",
                 )}
               >
                 <Icon className={cn("h-4 w-4", active && "scale-110")} />
