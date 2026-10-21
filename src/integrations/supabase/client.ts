@@ -200,7 +200,7 @@ async function verifyCodeAndSignIn(
         mobile: json.data.user.mobile,
       });
       saveActiveSession(session);
-      setTimeout(() => notifySubscribers("SIGNED_IN", session), 0);
+      notifySubscribers("SIGNED_IN", session);
       return { data: { user: session.user, session }, error: null };
     }
     return {
@@ -261,8 +261,7 @@ function createProductionAuth() {
         if (res.ok && json?.data?.user && json?.data?.session) {
           const session = buildSession(json.data.session, { full_name: fullName, mobile, ...meta });
           saveActiveSession(session);
-          // Notify subscribers asynchronously so the caller can return first
-          setTimeout(() => notifySubscribers("SIGNED_IN", session), 0);
+          notifySubscribers("SIGNED_IN", session);
           return { data: { user: session.user, session }, error: null };
         }
         return {
@@ -300,8 +299,7 @@ function createProductionAuth() {
           };
           const session = buildSession(json.data.session, meta);
           saveActiveSession(session);
-          // Notify subscribers asynchronously so the caller can return first
-          setTimeout(() => notifySubscribers("SIGNED_IN", session), 0);
+          notifySubscribers("SIGNED_IN", session);
           return { data: { user: session.user, session }, error: null };
         }
         return {

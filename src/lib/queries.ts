@@ -22,16 +22,27 @@ export function useHealth() {
     queryKey: keys.health,
     queryFn: api.health,
     retry: false,
+    staleTime: 60_000,
     refetchInterval: 60_000,
   });
 }
 
 export function useVehicles() {
-  return useQuery({ queryKey: keys.vehicles, queryFn: api.listVehicles, retry: false });
+  return useQuery({
+    queryKey: keys.vehicles,
+    queryFn: api.listVehicles,
+    staleTime: 60_000,
+    retry: false,
+  });
 }
 
 export function useSettings() {
-  return useQuery({ queryKey: keys.settings, queryFn: api.getSettings, retry: false });
+  return useQuery({
+    queryKey: keys.settings,
+    queryFn: api.getSettings,
+    staleTime: 60_000,
+    retry: false,
+  });
 }
 
 export function useTrips(
@@ -41,8 +52,10 @@ export function useTrips(
   return useQuery({
     queryKey: keys.trips(params),
     queryFn: () => api.listTrips(params),
+    staleTime: 60_000,
     retry: false,
     enabled,
+    placeholderData: (prev) => prev,
   });
 }
 
@@ -53,8 +66,10 @@ export function useReport(
   return useQuery({
     queryKey: keys.report(params),
     queryFn: () => api.report(params),
+    staleTime: 60_000,
     retry: false,
     enabled,
+    placeholderData: (prev) => prev,
   });
 }
 

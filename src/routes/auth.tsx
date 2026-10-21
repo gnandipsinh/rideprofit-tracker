@@ -240,8 +240,7 @@ function AuthPage() {
       setPassword("");
       setConfirmPassword("");
       toast.success("Account created successfully!");
-      // Navigation happens in the SIGNED_IN subscriber (outside this try/catch),
-      // so a router redirect can never be misreported as an error here.
+      void navigate({ to: "/", replace: true });
     } catch {
       if (succeeded) return; // redirect raised after a successful registration
       setFormError(GENERIC_ERROR);
@@ -347,7 +346,7 @@ function AuthPage() {
       }
       succeeded = true;
       toast.success("Signed in successfully");
-      // Navigation happens in the SIGNED_IN subscriber (outside this try/catch).
+      void navigate({ to: "/", replace: true });
     } catch {
       if (succeeded) return; // redirect raised after a successful sign-in
       setFormError(GENERIC_ERROR);
@@ -396,7 +395,7 @@ function AuthPage() {
         }
         succeeded = true;
         toast.success("Signed in successfully");
-        // Navigation happens in the SIGNED_IN subscriber (outside this try/catch).
+        void navigate({ to: "/", replace: true });
       } else {
         const { error } = await supabase.auth.verifyResetCode({
           email,
