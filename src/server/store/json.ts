@@ -1,11 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-<<<<<<< HEAD
 import type { DatabaseSchema, RateLimitResult, Store, UserRecord } from "./types";
-=======
-import type { DatabaseSchema, RateLimitResult, Store } from "./types";
->>>>>>> origin/main
 
 const DATA_DIR = path.resolve(process.cwd(), "data");
 const DB_FILE = path.join(DATA_DIR, "db.json");

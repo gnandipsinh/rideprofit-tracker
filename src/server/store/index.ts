@@ -46,10 +46,7 @@ export function normalizePostgresUrl(rawUrl: string): string {
   if (!protoMatch) return url;
 
   const [, proto, rest] = protoMatch;
-<<<<<<< HEAD
   if (!proto || !rest) return url;
-=======
->>>>>>> origin/main
   const lastAtIdx = rest.lastIndexOf("@");
   if (lastAtIdx === -1) return url;
 

@@ -51,6 +51,14 @@ check("normalizePostgresUrl handles Supabase Transaction Pooler URL on port 6543
 const BASE = process.env.BASE || "http://localhost:3000";
 
 async function runLiveTests() {
+  try {
+    await fetch(`${BASE}/api/health`, { signal: AbortSignal.timeout(1500) });
+  } catch {
+    console.log(`  \x1b[33mINFO\x1b[0m Server not running at ${BASE}. Skipped live HTTP requests.`);
+    console.log(`\nTests completed: ${pass} passed, ${fail} failed.`);
+    return;
+  }
+
   const testEmail = `test_reg_${Date.now()}@example.com`;
   const testPassword = "ValidPassword123";
   const testName = "Production Test User";

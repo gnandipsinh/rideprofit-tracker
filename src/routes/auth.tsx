@@ -34,8 +34,8 @@ import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/auth")({
   ssr: false,
-  validateSearch: (search: Record<string, unknown>) => ({
-    mode: typeof search.mode === "string" ? search.mode : undefined,
+  validateSearch: (search: Record<string, unknown>): { mode?: string | undefined } => ({
+    mode: typeof search["mode"] === "string" ? (search["mode"] as string) : undefined,
   }),
   head: () => ({
     meta: [

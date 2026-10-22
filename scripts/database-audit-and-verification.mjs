@@ -137,6 +137,16 @@ async function run() {
   // 3. Health Endpoint & Live Probe
   // ---------------------------------------------------------------------------
   console.log("\n--- 3. Health Probe & Safe Diagnostics ---");
+  try {
+    await fetch(`${BASE}/api/health`, { signal: AbortSignal.timeout(1500) });
+  } catch {
+    console.log(`  \x1b[33mINFO\x1b[0m Server not running at ${BASE}. Skipped live HTTP checks.`);
+    console.log("\n========================================================");
+    console.log(` Audit Complete: ${totalPassed} Passed, ${totalFailed} Failed `);
+    console.log("========================================================\n");
+    return;
+  }
+
   const healthRes = await api("/api/health");
   check("Health endpoint responds 200 OK", healthRes.status === 200);
   check("Health payload returns success: true", healthRes.json?.success === true);

@@ -20,30 +20,31 @@ export function HeroSection() {
   const [selectedMonth, setSelectedMonth] = useState("This Month");
   const [monthMenuOpen, setMonthMenuOpen] = useState(false);
 
-  const monthPresets: Record<
-    string,
-    {
-      profit: string;
-      trips: number;
-      income: string;
-      expense: string;
-      bars: { month: string; height: string; active?: boolean }[];
-    }
-  > = {
-    "This Month": {
-      profit: "₹2,48,500",
-      trips: 48,
-      income: "₹5,20,000",
-      expense: "₹2,71,500",
-      bars: [
-        { month: "Jan", height: "45%" },
-        { month: "Feb", height: "60%" },
-        { month: "Mar", height: "55%" },
-        { month: "Apr", height: "70%" },
-        { month: "May", height: "90%", active: true },
-        { month: "Jun", height: "65%" },
-      ],
-    },
+  type PresetData = {
+    profit: string;
+    trips: number;
+    income: string;
+    expense: string;
+    bars: { month: string; height: string; active?: boolean }[];
+  };
+
+  const defaultMonthData: PresetData = {
+    profit: "₹2,48,500",
+    trips: 48,
+    income: "₹5,20,000",
+    expense: "₹2,71,500",
+    bars: [
+      { month: "Jan", height: "45%" },
+      { month: "Feb", height: "60%" },
+      { month: "Mar", height: "55%" },
+      { month: "Apr", height: "70%" },
+      { month: "May", height: "90%", active: true },
+      { month: "Jun", height: "65%" },
+    ],
+  };
+
+  const monthPresets: Record<string, PresetData> = {
+    "This Month": defaultMonthData,
     "Last Month": {
       profit: "₹2,21,800",
       trips: 44,
@@ -74,7 +75,7 @@ export function HeroSection() {
     },
   };
 
-  const currentData = monthPresets[selectedMonth] ?? monthPresets["This Month"];
+  const currentData: PresetData = monthPresets[selectedMonth] ?? defaultMonthData;
 
   const handleDemoLogin = async () => {
     setDemoLoading(true);

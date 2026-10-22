@@ -36,11 +36,7 @@ import {
   isoDayOnly,
   todayInput,
 } from "@/lib/format";
-<<<<<<< HEAD
 import { DASHBOARD_PRESETS, dashboardRange, type DashboardPreset } from "@/lib/date-ranges";
-=======
-import { DASHBOARD_PRESETS, dashboardRange } from "@/lib/date-ranges";
->>>>>>> origin/main
 import { cn } from "@/lib/utils";
 
 function getGreeting() {
@@ -72,11 +68,7 @@ export function DashboardPage() {
     vehiclesLoading,
     vehiclesError,
   } = useApp();
-<<<<<<< HEAD
   const [preset, setPreset] = useState<DashboardPreset>("month");
-=======
-  const [preset, setPreset] = useState("month");
->>>>>>> origin/main
   const [custom, setCustom] = useState({
     fromDate: todayInput(),
     toDate: todayInput(),
