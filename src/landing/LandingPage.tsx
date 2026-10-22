@@ -20,18 +20,15 @@ export function LandingPage() {
         "features",
         "how-it-works",
         "screenshots",
-        "pricing",
         "reviews",
+        "pricing",
         "faq",
       ];
-      const scrollPos = window.scrollY + 140;
-
       for (const section of sections) {
         const el = document.getElementById(section);
         if (el) {
-          const top = el.offsetTop;
-          const height = el.offsetHeight;
-          if (scrollPos >= top && scrollPos < top + height) {
+          const rect = el.getBoundingClientRect();
+          if (rect.top <= 160 && rect.bottom >= 120) {
             setActiveSection(section);
             break;
           }
@@ -40,6 +37,7 @@ export function LandingPage() {
     };
 
     window.addEventListener("scroll", handleScroll, { passive: true });
+    handleScroll();
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
