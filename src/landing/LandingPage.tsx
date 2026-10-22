@@ -15,15 +15,7 @@ export function LandingPage() {
 
   useEffect(() => {
     const handleScroll = () => {
-      const sections = [
-        "home",
-        "features",
-        "how-it-works",
-        "screenshots",
-        "reviews",
-        "pricing",
-        "faq",
-      ];
+      const sections = ["home", "features", "how-it-works", "reviews", "pricing", "faq"];
       for (const section of sections) {
         const el = document.getElementById(section);
         if (el) {
@@ -65,14 +57,14 @@ export function LandingPage() {
         {/* Pricing Section */}
         <PricingSection />
 
-        {/* FAQ Section */}
-        <FaqSection />
-
         {/* Bottom CTA Banner */}
         <CtaBanner />
+
+        {/* FAQ Section */}
+        <FaqSection />
       </main>
 
-      {/* Footer */}
+      {/* Footer immediately following FAQ */}
       <LandingFooter />
     </div>
   );

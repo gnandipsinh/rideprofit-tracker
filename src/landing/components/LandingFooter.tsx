@@ -5,7 +5,6 @@ export function LandingFooter() {
     { label: "Home", href: "#home" },
     { label: "Features", href: "#features" },
     { label: "How It Works", href: "#how-it-works" },
-    { label: "Screenshots", href: "#screenshots" },
     { label: "Pricing", href: "#pricing" },
     { label: "FAQ", href: "#faq" },
     { label: "Login", href: "/auth" },

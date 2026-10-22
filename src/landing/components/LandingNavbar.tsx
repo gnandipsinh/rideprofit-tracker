@@ -35,7 +35,6 @@ export function LandingNavbar({ activeSection = "home" }: LandingNavbarProps) {
     { label: "Home", href: "#home", id: "home", icon: Home },
     { label: "Features", href: "#features", id: "features", icon: Sparkles },
     { label: "How It Works", href: "#how-it-works", id: "how-it-works", icon: Workflow },
-    { label: "Screenshots", href: "#screenshots", id: "screenshots", icon: Layers },
     { label: "Pricing", href: "#pricing", id: "pricing", icon: IndianRupee },
     { label: "FAQ", href: "#faq", id: "faq", icon: HelpCircle },
   ];

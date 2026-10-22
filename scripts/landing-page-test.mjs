@@ -52,7 +52,7 @@ const navbarCode = fs.readFileSync(
   path.resolve(process.cwd(), "src/landing/components/LandingNavbar.tsx"),
   "utf-8",
 );
-const expectedAnchors = ["#home", "#features", "#how-it-works", "#screenshots", "#pricing", "#faq"];
+const expectedAnchors = ["#home", "#features", "#how-it-works", "#pricing", "#faq"];
 for (const anchor of expectedAnchors) {
   assert.ok(navbarCode.includes(`"${anchor}"`), `Navbar must contain anchor ${anchor}`);
 }
