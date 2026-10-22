@@ -10,14 +10,15 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "bg-[image:var(--gradient-gold)] text-primary-foreground shadow-[var(--shadow-gold)] hover:brightness-105",
+          "bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-bold shadow-[0_4px_20px_-2px_rgba(6,182,212,0.45)] hover:from-cyan-400 hover:to-blue-500 hover:shadow-[0_6px_25px_-1px_rgba(6,182,212,0.65)] hover:brightness-105 border-0",
         destructive: "bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90",
         outline:
-          "border border-border bg-secondary/35 shadow-sm hover:border-primary/50 hover:bg-accent hover:text-accent-foreground",
-        secondary: "bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80",
-        ghost: "hover:bg-accent/80 hover:text-accent-foreground",
-        link: "text-primary underline-offset-4 hover:underline",
-        gold: "bg-[image:var(--gradient-gold)] text-primary-foreground shadow-[var(--shadow-gold)] hover:brightness-105",
+          "border border-cyan-500/25 bg-slate-900/60 text-slate-200 backdrop-blur-md shadow-sm hover:border-cyan-400/60 hover:bg-slate-800/80 hover:text-white",
+        secondary:
+          "border border-slate-800 bg-slate-900/80 text-slate-200 hover:bg-slate-800 hover:text-white shadow-sm",
+        ghost: "text-slate-300 hover:bg-slate-800/80 hover:text-white",
+        link: "text-cyan-400 hover:text-cyan-300 underline-offset-4 hover:underline",
+        gold: "bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-bold shadow-[0_4px_20px_-2px_rgba(6,182,212,0.45)] hover:from-cyan-400 hover:to-blue-500 hover:shadow-[0_6px_25px_-1px_rgba(6,182,212,0.65)] hover:brightness-105 border-0",
       },
       size: {
         default: "h-11 px-4 py-2",

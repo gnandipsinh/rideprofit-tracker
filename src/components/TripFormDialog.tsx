@@ -315,7 +315,7 @@ export function TripFormDialog({ open, onOpenChange, trip }: TripFormDialogProps
               <span className="text-muted-foreground">Total Expense</span>
               <span className="font-bold tabular-nums">{formatMoney(totalExpense, symbol)}</span>
             </div>
-            <div className="mt-2 h-px w-full gold-rule opacity-40" />
+            <div className="mt-2 h-px w-full bg-gradient-to-r from-transparent via-cyan-500/40 to-transparent" />
             <div className="mt-2 flex items-center justify-between gap-2">
               <span className="text-sm text-muted-foreground">Profit</span>
               <span

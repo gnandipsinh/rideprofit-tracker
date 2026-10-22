@@ -13,7 +13,7 @@
     "build:dev": "vite build --mode development",
     "start": "node .output/server/index.mjs",
     "preview": "vite preview --host 0.0.0.0 --port 3000",
-    "test": "node scripts/financial-calc-test.mjs && npx tsx scripts/registration-repair-test.mjs && npx tsx scripts/database-audit-and-verification.mjs",
+    "test": "node scripts/financial-calc-test.mjs && npx tsx scripts/registration-repair-test.mjs && npx tsx scripts/database-audit-and-verification.mjs && node scripts/landing-page-test.mjs",
     "generate-secret": "node scripts/generate-secret.mjs",
     "lint": "eslint .",
     "format": "prettier --write ."
@@ -95,6 +95,7 @@
     "globals": "^15.15.0",
     "nitro": "3.0.260603-beta",
     "prettier": "^3.7.3",
+    "sharp": "^0.35.5",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.56.1",
     "vite": "8.1.5"

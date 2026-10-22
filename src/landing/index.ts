@@ -3,11 +3,17 @@
  * Components, sections, and marketing styles for RideProfit Tracker
  */
 
-export interface LandingFeature {
-  title: string;
-  description: string;
-  iconName: string;
-}
+export { LandingPage } from "./LandingPage";
+export { LandingNavbar } from "./components/LandingNavbar";
+export { HeroSection } from "./components/HeroSection";
+export { FeaturesSection } from "./components/FeaturesSection";
+export { HowItWorksSection } from "./components/HowItWorksSection";
+export { StatsStrip } from "./components/StatsStrip";
+export { TestimonialsSection } from "./components/TestimonialsSection";
+export { PricingSection } from "./components/PricingSection";
+export { FaqSection } from "./components/FaqSection";
+export { CtaBanner } from "./components/CtaBanner";
+export { LandingFooter } from "./components/LandingFooter";
 
 export const LANDING_META = {
   title: "RideProfit Tracker — Modern Fleet Accounting & Profit Tracking",

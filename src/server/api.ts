@@ -806,6 +806,162 @@ export async function handleApiFetch(request: Request): Promise<Response> {
       });
     }
 
+    // 3a. Authentication: Demo Access (Instant One-Click Login)
+    if (path === "/api/auth/demo" && method === "POST") {
+      const demoEmail = "demo@rideprofit.app";
+      const demoUser = await withDatabase(async (db) => {
+        let user = db.users.find((u) => u.email.toLowerCase() === demoEmail);
+        if (!user) {
+          const demoUserId = "usr_demo_account_01";
+          user = {
+            id: demoUserId,
+            email: demoEmail,
+            password: await hashPassword("DemoPass@2026"),
+            fullName: "Demo Fleet Operator",
+            mobile: "9876543210",
+            createdAt: new Date().toISOString(),
+          };
+          db.users.push(user);
+
+          // Seed default demo business settings
+          const existingSettings = db.settings.find((s) => s.userId === demoUserId);
+          if (!existingSettings) {
+            db.settings.push({
+              _id: `set_${demoUserId}`,
+              userId: demoUserId,
+              appName: "RideProfit Demo Fleet",
+              transportationName: "Gujarat Logistics Fleet",
+              businessName: "Gujarat Logistics Fleet",
+              currency: "INR",
+              defaultVehicleId: null,
+              fullName: "Demo Fleet Operator",
+              mobileNumber: "9876543210",
+              address: "Ring Road, Transport Nagar, Ahmedabad",
+              contactNumber: "9876543210",
+              businessEmail: "demo@rideprofit.app",
+              updatedAt: new Date().toISOString(),
+            });
+          }
+
+          // Seed sample vehicles
+          const v1Id = "veh_demo_1";
+          const v2Id = "veh_demo_2";
+          const existingV1 = db.vehicles.find((v) => v._id === v1Id);
+          if (!existingV1) {
+            db.vehicles.push(
+              {
+                _id: v1Id,
+                userId: demoUserId,
+                name: "Eicher Pro 2049",
+                type: "Eicher",
+                model: "Pro 2049 LPK Tipper",
+                vehicleNumber: "GJ-01-AB-1234",
+                notes: "Primary distribution truck",
+                isActive: true,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              },
+              {
+                _id: v2Id,
+                userId: demoUserId,
+                name: "Tata 407 Gold",
+                type: "Tata",
+                model: "407 Gold SFC",
+                vehicleNumber: "GJ-05-CD-5678",
+                notes: "Express highway carrier",
+                isActive: true,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              },
+            );
+
+            // Seed sample trips for current month
+            const now = new Date();
+            const y = now.getFullYear();
+            const m = String(now.getMonth() + 1).padStart(2, "0");
+
+            db.trips.push(
+              {
+                _id: "trip_demo_1",
+                userId: demoUserId,
+                vehicleId: v1Id,
+                date: `${y}-${m}-04`,
+                income: 18500,
+                diesel: 7200,
+                driverPayment: 1500,
+                emiShare: 2000,
+                otherExpenses: 800,
+                otherExpenseItems: [
+                  { name: "Toll Tax", amount: 500 },
+                  { name: "Tea & Food", amount: 300 },
+                ],
+                notes: "Ahmedabad to Surat goods haul",
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              },
+              {
+                _id: "trip_demo_2",
+                userId: demoUserId,
+                vehicleId: v1Id,
+                date: `${y}-${m}-11`,
+                income: 24000,
+                diesel: 8800,
+                driverPayment: 1800,
+                emiShare: 2000,
+                otherExpenses: 1200,
+                otherExpenseItems: [
+                  { name: "Toll Tax", amount: 800 },
+                  { name: "Hamali & Unloading", amount: 400 },
+                ],
+                notes: "Full container industrial machinery cargo",
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              },
+              {
+                _id: "trip_demo_3",
+                userId: demoUserId,
+                vehicleId: v2Id,
+                date: `${y}-${m}-07`,
+                income: 16500,
+                diesel: 6200,
+                driverPayment: 1400,
+                emiShare: 1800,
+                otherExpenses: 600,
+                otherExpenseItems: [{ name: "Toll Plaza", amount: 600 }],
+                notes: "Vadodara to Bharuch distribution",
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              },
+              {
+                _id: "trip_demo_4",
+                userId: demoUserId,
+                vehicleId: v2Id,
+                date: `${y}-${m}-16`,
+                income: 26000,
+                diesel: 9600,
+                driverPayment: 2100,
+                emiShare: 1800,
+                otherExpenses: 1500,
+                otherExpenseItems: [
+                  { name: "Toll Tax", amount: 900 },
+                  { name: "Puncture & Maintenance", amount: 600 },
+                ],
+                notes: "Interstate delivery round trip",
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              },
+            );
+          }
+        }
+        return user;
+      });
+
+      return successResponse({
+        user: safeUser(demoUser),
+        session: await sessionFor(demoUser),
+      });
+    }
+
     // 3b. Request a login / password-reset code (sent by email)
     if (path === "/api/auth/email-code" && method === "POST") {
       const body = await readJson(request);
