@@ -21,16 +21,6 @@ interface LandingNavbarProps {
 
 export function LandingNavbar({ activeSection = "home" }: LandingNavbarProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [isScrolled, setIsScrolled] = useState(false);
-
-  useEffect(() => {
-    const onScroll = () => {
-      setIsScrolled(window.scrollY > 15);
-    };
-    window.addEventListener("scroll", onScroll, { passive: true });
-    onScroll();
-    return () => window.removeEventListener("scroll", onScroll);
-  }, []);
 
   // Close mobile drawer on Escape key
   useEffect(() => {
@@ -62,28 +52,15 @@ export function LandingNavbar({ activeSection = "home" }: LandingNavbarProps) {
 
     const element = document.getElementById(targetId);
     if (element) {
-      const headerOffset = 85;
-      const elementPosition = element.getBoundingClientRect().top + window.scrollY;
-      const offsetPosition = elementPosition - headerOffset;
-
-      window.scrollTo({
-        top: offsetPosition,
-        behavior: "smooth",
-      });
+      element.scrollIntoView({ behavior: "smooth" });
       window.history.pushState(null, "", `#${targetId}`);
     }
   };
 
   return (
     <>
-      <header
-        className={cn(
-          "sticky top-0 z-50 w-full transition-all duration-300",
-          isScrolled
-            ? "border-b border-cyan-500/25 bg-[#030712]/95 backdrop-blur-2xl shadow-[0_4px_30px_rgba(6,182,212,0.14)]"
-            : "border-b border-cyan-500/10 bg-[#030712]/85 backdrop-blur-xl",
-        )}
-      >
+      {/* Static Navbar - Scrolls naturally with the page */}
+      <header className="relative z-40 w-full border-b border-cyan-500/15 bg-[#030712] shadow-[0_2px_20px_rgba(0,0,0,0.5)]">
         <div className="mx-auto flex h-20 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
           {/* Logo: Truck icon + wordmark */}
           <a
@@ -106,7 +83,7 @@ export function LandingNavbar({ activeSection = "home" }: LandingNavbarProps) {
           </a>
 
           {/* Desktop Nav Links */}
-          <nav className="hidden md:flex items-center gap-1 rounded-full border border-slate-800/90 bg-slate-900/70 p-1.5 backdrop-blur-md shadow-[inset_0_1px_1px_rgba(255,255,255,0.06)]">
+          <nav className="hidden md:flex items-center gap-1 rounded-full border border-slate-800/90 bg-slate-900/70 p-1.5 shadow-[inset_0_1px_1px_rgba(255,255,255,0.06)]">
             {navLinks.map((link) => {
               const isActive = activeSection === link.id;
               return (
@@ -172,7 +149,7 @@ export function LandingNavbar({ activeSection = "home" }: LandingNavbarProps) {
 
         {/* Mobile Drawer */}
         {mobileOpen && (
-          <div className="border-b border-cyan-500/25 bg-[#050b16]/98 backdrop-blur-2xl px-4 py-5 md:hidden animate-in fade-in slide-in-from-top-3 duration-200">
+          <div className="border-b border-cyan-500/25 bg-[#050b16] px-4 py-5 md:hidden animate-in fade-in slide-in-from-top-3 duration-200">
             <nav className="flex flex-col gap-1.5">
               {navLinks.map((link) => {
                 const Icon = link.icon;
@@ -224,7 +201,7 @@ export function LandingNavbar({ activeSection = "home" }: LandingNavbarProps) {
       {/* Backdrop overlay for mobile drawer */}
       {mobileOpen && (
         <div
-          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm md:hidden"
+          className="fixed inset-0 z-30 bg-black/60 md:hidden"
           onClick={() => setMobileOpen(false)}
           aria-hidden="true"
         />
