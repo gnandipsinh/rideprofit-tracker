@@ -27,21 +27,23 @@ export function useHealth() {
   });
 }
 
-export function useVehicles() {
+export function useVehicles(enabled = true) {
   return useQuery({
     queryKey: keys.vehicles,
     queryFn: api.listVehicles,
     staleTime: 60_000,
     retry: false,
+    enabled,
   });
 }
 
-export function useSettings() {
+export function useSettings(enabled = true) {
   return useQuery({
     queryKey: keys.settings,
     queryFn: api.getSettings,
     staleTime: 60_000,
     retry: false,
+    enabled,
   });
 }
 

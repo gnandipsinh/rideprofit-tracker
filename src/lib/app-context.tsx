@@ -21,9 +21,32 @@ interface AppContextValue {
 
 const AppContext = createContext<AppContextValue | null>(null);
 
+import { supabase } from "@/integrations/supabase/client";
+
 export function AppProvider({ children }: { children: ReactNode }) {
-  const vehiclesQuery = useVehicles();
-  const settingsQuery = useSettings();
+  const [hasSession, setHasSession] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      const stored = window.localStorage.getItem("vcs.auth.active_session");
+      if (!stored) return false;
+      const parsed = JSON.parse(stored) as { access_token?: string } | null;
+      return Boolean(parsed?.access_token);
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    const { data } = supabase.auth.onAuthStateChange(
+      (_event: string, session: { access_token?: string } | null) => {
+        setHasSession(Boolean(session?.access_token));
+      },
+    );
+    return () => data.subscription.unsubscribe();
+  }, []);
+
+  const vehiclesQuery = useVehicles(hasSession);
+  const settingsQuery = useSettings(hasSession);
   const [selectedVehicleId, setSelected] = useState<string>("");
 
   const vehicles = useMemo(() => vehiclesQuery.data ?? [], [vehiclesQuery.data]);

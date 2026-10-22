@@ -85,20 +85,29 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         name: "viewport",
         content: "width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover",
       },
-      { title: "Eicher Calculation" },
+      { title: "RideProfit Tracker — Modern Fleet Accounting & Real Profit" },
       {
         name: "description",
         content:
           "Vehicle-wise trip accounting and profit calculation system with multi-vehicle tracking, expense management, and PDF reports.",
       },
-      { property: "og:title", content: "Eicher Calculation" },
+      {
+        property: "og:title",
+        content: "RideProfit Tracker — Modern Fleet Accounting & Real Profit",
+      },
       {
         property: "og:description",
         content:
           "Vehicle-wise trip accounting and profit calculation system with multi-vehicle tracking, expense management, and PDF reports.",
       },
       { property: "og:type", content: "website" },
+      { property: "og:image", content: "/assets/landing/hero-showcase.png" },
       { name: "twitter:card", content: "summary_large_image" },
+      {
+        name: "twitter:title",
+        content: "RideProfit Tracker — Modern Fleet Accounting & Real Profit",
+      },
+      { name: "twitter:image", content: "/assets/landing/hero-showcase.png" },
       { name: "twitter:site", content: "@Lovable" },
       { name: "theme-color", content: "#0b1422" },
       { name: "mobile-web-app-capable", content: "yes" },
