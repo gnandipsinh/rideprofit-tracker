@@ -46,7 +46,7 @@ export function LandingPage() {
       {/* Top Navigation */}
       <LandingNavbar activeSection={activeSection} />
 
-      <main>
+      <main className="pt-20">
         {/* Hero Section */}
         <HeroSection />
 
