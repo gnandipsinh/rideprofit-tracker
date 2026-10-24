@@ -27,6 +27,10 @@ export interface Trip {
   otherExpenses: number;
   emiShare: number;
   notes: string;
+  route?: string;
+  driverName?: string;
+  totalKm?: number;
+  dieselLiters?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -90,6 +94,10 @@ export interface TripPayload {
   emiShare: number;
   otherExpenseItems: OtherExpenseItem[];
   notes: string;
+  route?: string;
+  driverName?: string;
+  totalKm?: number;
+  dieselLiters?: number;
 }
 
 export const VEHICLE_TYPES = [

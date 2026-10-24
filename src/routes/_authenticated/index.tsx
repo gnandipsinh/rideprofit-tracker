@@ -18,6 +18,9 @@ import {
   Truck,
   Route as RouteIcon,
   Calendar,
+  Gauge,
+  MapPin,
+  User,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { VehicleSelector } from "@/components/VehicleSelector";
@@ -29,6 +32,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useApp } from "@/lib/app-context";
 import { useTrips } from "@/lib/queries";
 import { aggregate, profitOf, roundCurrency, totalExpenseOf } from "@/lib/calc";
+import { calculateMileage } from "@/lib/whatsapp";
 import {
   formatDateShort,
   formatIndianNumber,
@@ -75,14 +79,11 @@ export function DashboardPage() {
   });
 
   const range = useMemo(() => dashboardRange(preset, custom), [preset, custom]);
-  const tripsQuery = useTrips(
-    {
-      vehicleId: selectedVehicleId,
-      fromDate: range.fromDate,
-      toDate: range.toDate,
-    },
-    Boolean(selectedVehicleId),
-  );
+  const tripsQuery = useTrips({
+    vehicleId: selectedVehicleId || "all",
+    fromDate: range.fromDate,
+    toDate: range.toDate,
+  });
 
   const activeVehicleIds = useMemo(
     () => new Set(activeVehicles.map((v) => v._id)),
@@ -90,6 +91,7 @@ export function DashboardPage() {
   );
   const trips = useMemo(() => {
     const raw = tripsQuery.data ?? [];
+    if (activeVehicleIds.size === 0) return raw;
     return raw.filter((t) => activeVehicleIds.has(t.vehicleId));
   }, [tripsQuery.data, activeVehicleIds]);
 
@@ -327,16 +329,45 @@ export function DashboardPage() {
                 <ul className="space-y-2">
                   {recentTrips.map((t) => {
                     const profit = profitOf(t);
+                    const mileage =
+                      t.totalKm && t.dieselLiters
+                        ? calculateMileage(t.totalKm, t.dieselLiters)
+                        : null;
                     return (
                       <li key={t._id} className="glass-card glass-card-hover rounded-2xl p-3">
                         <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
                           <div className="min-w-0">
-                            <p className="truncate text-sm font-bold">
-                              {vehicleLabel.get(t.vehicleId) ?? "Vehicle"}
-                            </p>
-                            <p className="mt-0.5 text-xs text-muted-foreground">
-                              {formatDateShort(t.date)}
-                            </p>
+                            <div className="flex items-center gap-2">
+                              <p className="truncate text-sm font-bold">
+                                {vehicleLabel.get(t.vehicleId) ?? "Vehicle"}
+                              </p>
+                              {t.route ? (
+                                <span className="hidden sm:inline-flex items-center gap-1 text-[0.68rem] text-cyan-400 font-semibold bg-cyan-500/10 border border-cyan-500/20 px-1.5 py-0.5 rounded truncate max-w-[14rem]">
+                                  <MapPin className="h-2.5 w-2.5 shrink-0" />
+                                  <span className="truncate">{t.route}</span>
+                                </span>
+                              ) : null}
+                            </div>
+                            {t.route ? (
+                              <p className="sm:hidden text-[0.7rem] text-cyan-400 font-medium truncate mt-0.5">
+                                📍 {t.route}
+                              </p>
+                            ) : null}
+                            <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                              <span>{formatDateShort(t.date)}</span>
+                              {t.driverName ? (
+                                <span className="inline-flex items-center gap-1 text-[0.68rem] text-muted-foreground font-medium">
+                                  <User className="h-2.5 w-2.5 text-primary" />
+                                  {t.driverName}
+                                </span>
+                              ) : null}
+                              {mileage !== null ? (
+                                <span className="inline-flex items-center gap-1 text-[0.68rem] font-semibold text-amber-400 bg-amber-500/10 border border-amber-500/25 px-1.5 py-0.5 rounded">
+                                  <Gauge className="h-2.5 w-2.5" />
+                                  {mileage} km/L
+                                </span>
+                              ) : null}
+                            </div>
                           </div>
                           <span
                             className={cn(

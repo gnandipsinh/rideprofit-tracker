@@ -90,6 +90,7 @@ export function AppShell({
                 <Link
                   key={item.to}
                   to={item.to}
+                  preload="intent"
                   className={cn(
                     "tap-scale rounded-xl px-3.5 py-1.5 text-xs font-semibold transition-all duration-200",
                     pathname === item.to
@@ -166,6 +167,7 @@ export function AppShell({
               <Link
                 key={item.to}
                 to={item.to}
+                preload="intent"
                 className={cn(
                   "tap-scale flex flex-col items-center justify-center gap-1 rounded-2xl py-1.5 text-center transition-all duration-200",
                   active

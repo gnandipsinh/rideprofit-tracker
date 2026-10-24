@@ -9,6 +9,7 @@ import {
   MailOpen,
   Phone,
   ShieldCheck,
+  Sparkles,
   Truck,
   User,
 } from "lucide-react";
@@ -175,6 +176,24 @@ function AuthPage() {
   const [code, setCode] = useState("");
   const [codeNotice, setCodeNotice] = useState("");
   const [cooldown, setCooldown] = useState(0);
+  const [demoLoading, setDemoLoading] = useState(false);
+
+  async function handleDemoLogin() {
+    setDemoLoading(true);
+    try {
+      const { error } = await supabase.auth.signInAsDemo();
+      if (error) {
+        toast.error(error.message || "Failed to load demo account");
+        return;
+      }
+      toast.success("Welcome to Demo Mode! Exploring Express Logistics Fleet.");
+      void navigate({ to: "/", replace: true });
+    } catch {
+      toast.error("An error occurred starting demo account.");
+    } finally {
+      setDemoLoading(false);
+    }
+  }
 
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -825,6 +844,29 @@ function AuthPage() {
               </Button>
             </form>
           ) : null}
+
+          {/* Instant Demo Account Access */}
+          <div className="mt-6 pt-5 border-t border-border/60 space-y-2.5">
+            <button
+              type="button"
+              onClick={handleDemoLogin}
+              disabled={busy || demoLoading}
+              className="w-full flex items-center justify-center gap-2 rounded-xl py-3 px-4 text-xs font-bold text-cyan-300 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 hover:border-cyan-400 transition-all cursor-pointer disabled:opacity-50"
+            >
+              <Sparkles className="h-3.5 w-3.5 text-cyan-400 animate-pulse" />
+              <span>
+                {demoLoading ? "Starting Demo…" : "Try Demo Account (Instant 1-Click Access)"}
+              </span>
+            </button>
+            <div className="text-center">
+              <Link
+                to="/landing"
+                className="inline-block text-[0.75rem] font-medium text-muted-foreground hover:text-cyan-400 transition-colors"
+              >
+                ← Back to Landing Page
+              </Link>
+            </div>
+          </div>
         </div>
 
         <p className="mt-5 text-center text-[0.7rem] leading-relaxed text-muted-foreground">

@@ -1,6 +1,15 @@
 import { useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { Pencil, Route as RouteIcon, Search, Trash2 } from "lucide-react";
+import {
+  Pencil,
+  Route as RouteIcon,
+  Search,
+  Trash2,
+  MessageCircle,
+  MapPin,
+  User,
+  Gauge,
+} from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { VehicleSelector } from "@/components/VehicleSelector";
 import { EmptyState } from "@/components/EmptyState";
@@ -9,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { calculateMileage, formatTripWhatsAppMessage, openWhatsAppShare } from "@/lib/whatsapp";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -52,7 +62,7 @@ function firstOfMonth(): string {
 }
 
 function TripsPage() {
-  const { symbol, selectedVehicleId, activeVehicles } = useApp();
+  const { symbol, selectedVehicleId, activeVehicles, appName } = useApp();
   const remove = useDeleteTrip();
 
   const [range, setRange] = useState({ fromDate: firstOfMonth(), toDate: todayInput() });
@@ -61,16 +71,18 @@ function TripsPage() {
   const [confirm, setConfirm] = useState<Trip | null>(null);
   const [search, setSearch] = useState("");
 
-  const tripsQuery = useTrips(
-    { vehicleId: selectedVehicleId, fromDate: range.fromDate, toDate: range.toDate },
-    Boolean(selectedVehicleId),
-  );
+  const tripsQuery = useTrips({
+    vehicleId: selectedVehicleId || "all",
+    fromDate: range.fromDate,
+    toDate: range.toDate,
+  });
   const activeVehicleIds = useMemo(
     () => new Set(activeVehicles.map((v) => v._id)),
     [activeVehicles],
   );
   const trips = useMemo(() => {
     const raw = tripsQuery.data ?? [];
+    if (activeVehicleIds.size === 0) return raw;
     return raw.filter((t) => activeVehicleIds.has(t.vehicleId));
   }, [tripsQuery.data, activeVehicleIds]);
   const totals = useMemo(() => aggregate(trips), [trips]);
@@ -202,7 +214,7 @@ function TripsPage() {
               return (
                 <li key={t._id} className="glass-card overflow-hidden rounded-2xl">
                   <div className="p-4">
-                    <div className="flex items-center justify-between mb-3 gap-3">
+                    <div className="flex items-start justify-between mb-2.5 gap-2">
                       <div className="min-w-0">
                         <h3 className="truncate text-base font-bold">{formatDate(t.date)}</h3>
                         <p className="mt-0.5 truncate text-xs text-muted-foreground">
@@ -210,7 +222,21 @@ function TripsPage() {
                           {vNum ? ` · ${vNum}` : ""}
                         </p>
                       </div>
-                      <div className="flex gap-1">
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Share on WhatsApp"
+                          aria-label="Share trip summary on WhatsApp"
+                          className="h-9 w-9 rounded-xl text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/15"
+                          onClick={() => {
+                            const vLabel = [vType || vName, vNum].filter(Boolean).join(" · ");
+                            const msg = formatTripWhatsAppMessage(t, vLabel, appName, symbol);
+                            openWhatsAppShare(msg);
+                          }}
+                        >
+                          <MessageCircle className="h-4 w-4" />
+                        </Button>
                         <Button
                           variant="ghost"
                           size="icon"
@@ -234,6 +260,41 @@ function TripsPage() {
                         </Button>
                       </div>
                     </div>
+
+                    {/* Route, Driver Name & Mileage Badges */}
+                    {(t.route || t.driverName || (t.totalKm && t.dieselLiters)) && (
+                      <div className="flex flex-wrap items-center gap-1.5 mb-3">
+                        {t.route ? (
+                          <Badge
+                            variant="outline"
+                            className="border-cyan-500/35 bg-cyan-500/10 text-cyan-300 text-[0.68rem] py-0.5 px-2 gap-1"
+                          >
+                            <MapPin className="h-3 w-3 text-cyan-400" />
+                            <span>{t.route}</span>
+                          </Badge>
+                        ) : null}
+                        {t.driverName ? (
+                          <Badge
+                            variant="outline"
+                            className="border-slate-700 bg-slate-800/80 text-slate-300 text-[0.68rem] py-0.5 px-2 gap-1"
+                          >
+                            <User className="h-3 w-3 text-cyan-400" />
+                            <span>{t.driverName}</span>
+                          </Badge>
+                        ) : null}
+                        {calculateMileage(t.totalKm, t.dieselLiters) ? (
+                          <Badge
+                            variant="outline"
+                            className="border-emerald-500/35 bg-emerald-500/10 text-emerald-300 text-[0.68rem] py-0.5 px-2 gap-1 font-mono"
+                          >
+                            <Gauge className="h-3 w-3 text-emerald-400" />
+                            <span>
+                              {calculateMileage(t.totalKm, t.dieselLiters)} km/L ({t.totalKm} km)
+                            </span>
+                          </Badge>
+                        ) : null}
+                      </div>
+                    )}
 
                     <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
                       <div>

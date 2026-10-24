@@ -2,7 +2,6 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { formatDateShort, formatMoney } from "./format";
 import { NOTO_SANS_BOLD_BASE64, NOTO_SANS_REGULAR_BASE64 } from "./report-font";
-import { TRUCK_HEADER_IMAGE_BASE64 } from "./report-truck-image";
 import type { ReportPayload } from "./types";
 
 const FONT = "NotoSans";
@@ -149,123 +148,183 @@ export function buildReportPdf(report: ReportPayload, companyName: string, symbo
   const contentWidth = pageWidth - MARGIN * 2; // 555.28 pt
   const money = (n: number) => formatMoney(n, symbol);
   const s = report.summary;
+  const title = companyName || "Express Logistics Fleet";
 
   /* ========================================================================== */
-  /* 1. HEADER BANNER (Transport-themed with panoramic truck header)            */
+  /* 1. EXECUTIVE VECTOR HEADER BANNER (Sharp, modern, no photo distortion)     */
   /* ========================================================================== */
   const headerY = 16;
-  const headerH = 106;
+  const headerH = 88;
 
-  // Render High-Resolution Transport Truck Panoramic Header
-  try {
-    doc.addImage(
-      TRUCK_HEADER_IMAGE_BASE64,
-      "JPEG",
-      MARGIN,
-      headerY,
-      contentWidth,
-      headerH,
-      undefined,
-      "FAST",
-    );
-  } catch (e) {
-    console.error("Failed to render truck header image into PDF:", e);
-    // Deep transport navy fallback
-    doc.setFillColor(11, 37, 69);
-    doc.rect(MARGIN, headerY, contentWidth, headerH, "F");
-  }
+  // Primary rich corporate navy background
+  doc.setFillColor(12, 28, 56);
+  doc.roundedRect(MARGIN, headerY, contentWidth, headerH, 6, 6, "F");
 
-  // Cyan neon glow bar at the bottom of the header banner
-  doc.setFillColor(56, 189, 248);
+  // Modern stylized diagonal accent overlay on right side
+  doc.setFillColor(24, 52, 98);
+  doc.triangle(
+    MARGIN + contentWidth - 190,
+    headerY,
+    MARGIN + contentWidth,
+    headerY,
+    MARGIN + contentWidth,
+    headerY + headerH,
+    "F",
+  );
+  doc.triangle(
+    MARGIN + contentWidth - 190,
+    headerY,
+    MARGIN + contentWidth,
+    headerY + headerH,
+    MARGIN + contentWidth - 130,
+    headerY + headerH,
+    "F",
+  );
+
+  // Bottom neon cyan accent line
+  doc.setFillColor(6, 182, 212);
   doc.rect(MARGIN, headerY + headerH - 3, contentWidth, 3, "F");
 
-  // Company Name (Prominent bold white text)
-  const title = companyName || "Vehicle Calculation System";
+  // Top luxury badge: OFFICIAL FLEET STATEMENT
+  doc.setFillColor(28, 62, 116);
+  doc.roundedRect(MARGIN + 16, headerY + 12, 168, 15, 3, 3, "F");
   doc.setFont(FONT, "bold");
-  const titleFontSize = title.length > 32 ? 16 : 19;
+  doc.setFontSize(7);
+  doc.setTextColor(56, 189, 248); // Cyan text
+  doc.text("★ OFFICIAL FLEET ACCOUNTING STATEMENT", MARGIN + 22, headerY + 22.5);
+
+  // Company Name (Prominent bold white text)
+  doc.setFont(FONT, "bold");
+  const titleFontSize = title.length > 28 ? 15 : 18;
   doc.setFontSize(titleFontSize);
   doc.setTextColor(255, 255, 255);
-  doc.text(title, MARGIN + 18, headerY + 46);
+  doc.text(title, MARGIN + 16, headerY + 47);
 
   // Subtitle
-  doc.setFont(FONT, "bold");
-  doc.setFontSize(11);
-  doc.setTextColor(224, 242, 254); // Light sky blue (#e0f2fe)
-  doc.text("Vehicle Calculation Report", MARGIN + 18, headerY + 70);
-
-  /* ========================================================================== */
-  /* 2. REPORT INFORMATION BAR (Exact reference layout with vector icons)       */
-  /* ========================================================================== */
-  const infoY = headerY + headerH + 10;
-  const infoH = 48;
-
-  doc.setFillColor(240, 247, 255); // Soft blue background (#f0f7ff)
-  doc.setDrawColor(186, 215, 250); // Thin blue border (#bad7fa)
-  doc.setLineWidth(0.8);
-  doc.roundedRect(MARGIN, infoY, contentWidth, infoH, 4, 4, "FD");
-
-  const leftColX = MARGIN + 16;
-  const rightColX = MARGIN + contentWidth / 2 + 18;
-  const iconBlue: [number, number, number] = [29, 78, 216]; // Royal Blue
-
-  // Row 1: Vehicle & Generated Date
-  drawInfoGlyph(doc, "truck", leftColX, infoY + 18, iconBlue);
-  doc.setFont(FONT, "bold");
-  doc.setFontSize(8.5);
-  doc.setTextColor(29, 78, 216);
-  doc.text("Vehicle:", leftColX + 16, infoY + 18);
-
-  doc.setFont(FONT, "bold");
-  doc.setFontSize(9);
-  doc.setTextColor(15, 23, 42); // Bold navy/black value
-  doc.text(report.vehicleLabel, leftColX + 56, infoY + 18);
-
-  drawInfoGlyph(doc, "clock", rightColX, infoY + 18, iconBlue);
-  doc.setFont(FONT, "bold");
-  doc.setFontSize(8.5);
-  doc.setTextColor(29, 78, 216);
-  doc.text("Generated:", rightColX + 14, infoY + 18);
-
   doc.setFont(FONT, "normal");
   doc.setFontSize(9);
-  doc.setTextColor(15, 23, 42);
-  doc.text(formatDateShort(new Date().toISOString()), rightColX + 64, infoY + 18);
+  doc.setTextColor(203, 213, 225); // Slate 300
+  doc.text("Vehicle Profit, Expense & Operating Performance Ledger", MARGIN + 16, headerY + 65);
 
-  // Row 2: Period & Total Trips
-  drawInfoGlyph(doc, "calendar", leftColX, infoY + 36, iconBlue);
+  // Right-hand side Document Control Box
+  const refBoxW = 120;
+  const refBoxX = MARGIN + contentWidth - refBoxW - 14;
+  const refBoxY = headerY + 12;
+
+  doc.setFillColor(15, 36, 70);
+  doc.setDrawColor(45, 85, 145);
+  doc.setLineWidth(0.8);
+  doc.roundedRect(refBoxX, refBoxY, refBoxW, 64, 4, 4, "FD");
+
+  doc.setFont(FONT, "bold");
+  doc.setFontSize(6.8);
+  doc.setTextColor(148, 163, 184); // Slate 400
+  doc.text("STATEMENT REF", refBoxX + 8, refBoxY + 12);
+  doc.setFont(FONT, "bold");
+  doc.setFontSize(8);
+  doc.setTextColor(255, 255, 255);
+  const refId = `#RP-${report.fromDate.replace(/-/g, "").slice(2)}-${String(s.trips).padStart(3, "0")}`;
+  doc.text(refId, refBoxX + 8, refBoxY + 23);
+
+  doc.setFont(FONT, "bold");
+  doc.setFontSize(6.8);
+  doc.setTextColor(148, 163, 184);
+  doc.text("DATE GENERATED", refBoxX + 8, refBoxY + 36);
+  doc.setFont(FONT, "normal");
+  doc.setFontSize(7.5);
+  doc.setTextColor(226, 232, 240);
+  doc.text(formatDateShort(new Date().toISOString()), refBoxX + 8, refBoxY + 46);
+
+  // Status Indicator
+  doc.setFillColor(34, 197, 94); // Green dot
+  doc.circle(refBoxX + 11, refBoxY + 56, 2.5, "F");
+  doc.setFont(FONT, "bold");
+  doc.setFontSize(6.8);
+  doc.setTextColor(34, 197, 94);
+  doc.text("RECONCILED & AUDITED", refBoxX + 18, refBoxY + 58.5);
+
+  /* ========================================================================== */
+  /* 2. REPORT INFORMATION BAR                                                  */
+  /* ========================================================================== */
+  const infoY = headerY + headerH + 8;
+  const infoH = 38;
+
+  doc.setFillColor(248, 250, 252); // Slate 50
+  doc.setDrawColor(226, 232, 240); // Slate 200
+  doc.setLineWidth(0.8);
+  doc.roundedRect(MARGIN, infoY, contentWidth, infoH, 5, 5, "FD");
+
+  const quarterW = contentWidth / 4;
+  const iconBlue: [number, number, number] = [29, 78, 216];
+
+  // Tile 1: Vehicle
+  drawInfoGlyph(doc, "truck", MARGIN + 12, infoY + 20, iconBlue);
+  doc.setFont(FONT, "bold");
+  doc.setFontSize(7);
+  doc.setTextColor(100, 116, 139);
+  doc.text("VEHICLE / FLEET", MARGIN + 26, infoY + 15);
   doc.setFont(FONT, "bold");
   doc.setFontSize(8.5);
-  doc.setTextColor(29, 78, 216);
-  doc.text("Period:", leftColX + 16, infoY + 36);
+  doc.setTextColor(15, 23, 42);
+  const vLabel =
+    report.vehicleLabel.length > 24 ? report.vehicleLabel.slice(0, 22) + "…" : report.vehicleLabel;
+  doc.text(vLabel, MARGIN + 26, infoY + 28);
 
+  // Separator 1
+  doc.setDrawColor(226, 232, 240);
+  doc.line(MARGIN + quarterW, infoY + 6, MARGIN + quarterW, infoY + infoH - 6);
+
+  // Tile 2: Period
+  drawInfoGlyph(doc, "calendar", MARGIN + quarterW + 12, infoY + 20, iconBlue);
   doc.setFont(FONT, "bold");
-  doc.setFontSize(9);
+  doc.setFontSize(7);
+  doc.setTextColor(100, 116, 139);
+  doc.text("STATEMENT PERIOD", MARGIN + quarterW + 26, infoY + 15);
+  doc.setFont(FONT, "bold");
+  doc.setFontSize(8.2);
   doc.setTextColor(15, 23, 42);
   doc.text(
     `${formatDateShort(report.fromDate)} — ${formatDateShort(report.toDate)}`,
-    leftColX + 56,
-    infoY + 36,
+    MARGIN + quarterW + 26,
+    infoY + 28,
   );
 
-  drawInfoGlyph(doc, "trips", rightColX, infoY + 36, iconBlue);
+  // Separator 2
+  doc.line(MARGIN + quarterW * 2, infoY + 6, MARGIN + quarterW * 2, infoY + infoH - 6);
+
+  // Tile 3: Total Runs
+  drawInfoGlyph(doc, "trips", MARGIN + quarterW * 2 + 12, infoY + 20, iconBlue);
+  doc.setFont(FONT, "bold");
+  doc.setFontSize(7);
+  doc.setTextColor(100, 116, 139);
+  doc.text("TOTAL RUNS", MARGIN + quarterW * 2 + 26, infoY + 15);
   doc.setFont(FONT, "bold");
   doc.setFontSize(8.5);
-  doc.setTextColor(29, 78, 216);
-  doc.text("Total Trips:", rightColX + 14, infoY + 36);
-
-  doc.setFont(FONT, "bold");
-  doc.setFontSize(9.5);
   doc.setTextColor(15, 23, 42);
-  doc.text(String(s.trips), rightColX + 64, infoY + 36);
+  doc.text(`${s.trips} Completed Trip(s)`, MARGIN + quarterW * 2 + 26, infoY + 28);
+
+  // Separator 3
+  doc.line(MARGIN + quarterW * 3, infoY + 6, MARGIN + quarterW * 3, infoY + infoH - 6);
+
+  // Tile 4: Ledger Status
+  drawInfoGlyph(doc, "clock", MARGIN + quarterW * 3 + 12, infoY + 20, iconBlue);
+  doc.setFont(FONT, "bold");
+  doc.setFontSize(7);
+  doc.setTextColor(100, 116, 139);
+  doc.text("LEDGER STATUS", MARGIN + quarterW * 3 + 26, infoY + 15);
+  doc.setFont(FONT, "bold");
+  doc.setFontSize(8.5);
+  doc.setTextColor(22, 163, 74);
+  doc.text("Balanced & Reconciled", MARGIN + quarterW * 3 + 26, infoY + 28);
 
   /* ========================================================================== */
-  /* 3. EIGHT SUMMARY CARDS (4 x 2 Grid Matching Reference Image)               */
+  /* 3. EIGHT KEY PERFORMANCE METRIC CARDS (4 x 2 Grid)                         */
   /* ========================================================================== */
-  const cardsY = infoY + infoH + 10;
-  const cardGap = 8;
+  const cardsY = infoY + infoH + 8;
+  const cardGap = 6;
   const cols = 4;
-  const cardW = (contentWidth - cardGap * (cols - 1)) / cols; // ~132.8 pt each
-  const cardH = 64; // Generous height for readability on phone and print
+  const cardW = (contentWidth - cardGap * (cols - 1)) / cols; // ~134.3 pt
+  const cardH = 50; // Sleek and compact
 
   interface CardConfig {
     type: string;
@@ -294,38 +353,38 @@ export function buildReportPdf(report: ReportPayload, companyName: string, symbo
       type: "income",
       label: "TOTAL INCOME",
       value: money(s.income),
-      bg: [240, 253, 244],
-      border: [187, 247, 208],
-      accent: [21, 128, 61],
-      valColor: [21, 128, 61],
+      bg: [236, 253, 245],
+      border: [167, 243, 208],
+      accent: [5, 150, 105],
+      valColor: [5, 150, 105],
     },
     {
       type: "diesel",
       label: "TOTAL DIESEL",
       value: money(s.diesel),
-      bg: [254, 242, 242],
-      border: [254, 202, 202],
-      accent: [185, 28, 28],
-      valColor: [185, 28, 28],
+      bg: [255, 247, 237],
+      border: [254, 215, 170],
+      accent: [217, 119, 6],
+      valColor: [194, 65, 12],
     },
     {
       type: "driver",
       label: "DRIVER PAYMENT",
       value: money(s.driverPayment),
-      bg: [245, 243, 255],
-      border: [221, 214, 254],
-      accent: [67, 56, 202],
-      valColor: [55, 48, 163],
+      bg: [238, 242, 255],
+      border: [199, 210, 254],
+      accent: [79, 70, 229],
+      valColor: [67, 56, 202],
     },
     // Row 2
     {
       type: "other",
       label: "OTHER EXPENSES",
       value: money(s.otherExpenses),
-      bg: [255, 251, 235],
-      border: [253, 230, 138],
-      accent: [180, 83, 9],
-      valColor: [180, 83, 9],
+      bg: [248, 250, 252],
+      border: [226, 232, 240],
+      accent: [71, 85, 105],
+      valColor: [51, 65, 85],
     },
     {
       type: "emi",
@@ -333,17 +392,17 @@ export function buildReportPdf(report: ReportPayload, companyName: string, symbo
       value: money(s.emiShare),
       bg: [239, 246, 255],
       border: [191, 219, 254],
-      accent: [29, 78, 216],
+      accent: [37, 99, 235],
       valColor: [30, 64, 175],
     },
     {
       type: "expense",
       label: "TOTAL EXPENSE",
       value: money(s.totalExpense),
-      bg: [240, 253, 250],
-      border: [153, 246, 228],
-      accent: [15, 118, 110],
-      valColor: [15, 23, 42],
+      bg: [255, 241, 242],
+      border: [254, 205, 211],
+      accent: [225, 29, 72],
+      valColor: [225, 29, 72],
     },
     {
       type: "profit",
@@ -351,7 +410,7 @@ export function buildReportPdf(report: ReportPayload, companyName: string, symbo
       value: money(s.profit),
       bg: isProfit ? [240, 253, 244] : [254, 242, 242],
       border: isProfit ? [134, 239, 172] : [254, 202, 202],
-      accent: isProfit ? [21, 128, 61] : [185, 28, 28],
+      accent: isProfit ? [22, 163, 74] : [220, 38, 38],
       valColor: isProfit ? [22, 163, 74] : [220, 38, 38],
     },
   ];
@@ -365,45 +424,45 @@ export function buildReportPdf(report: ReportPayload, companyName: string, symbo
     // Card background & border
     doc.setFillColor(c.bg[0], c.bg[1], c.bg[2]);
     doc.setDrawColor(c.border[0], c.border[1], c.border[2]);
-    doc.setLineWidth(0.8);
+    doc.setLineWidth(0.75);
     doc.roundedRect(x, y, cardW, cardH, 4, 4, "FD");
 
     // Icon (centered at top)
     const iconX = x + cardW / 2;
-    const iconY = y + 14;
+    const iconY = y + 12;
     drawCardIcon(doc, c.type, iconX, iconY, c.accent);
 
     // Label
     doc.setFont(FONT, "bold");
-    doc.setFontSize(7.2);
+    doc.setFontSize(6.8);
     doc.setTextColor(c.accent[0], c.accent[1], c.accent[2]);
-    doc.text(c.label, iconX, y + 33, { align: "center" });
+    doc.text(c.label, iconX, y + 27, { align: "center" });
 
-    // Value (Prominent, bold, readable)
+    // Value
     doc.setFont(FONT, "bold");
-    const valFontSize = c.value.length > 9 ? 12.5 : 14.5;
+    const valFontSize = c.value.length > 9 ? 11 : 12.5;
     doc.setFontSize(valFontSize);
     doc.setTextColor(c.valColor[0], c.valColor[1], c.valColor[2]);
-    doc.text(c.value, iconX, y + 52, { align: "center" });
+    doc.text(c.value, iconX, y + 42, { align: "center" });
   });
 
   /* ========================================================================== */
-  /* 4. PROFESSIONAL TRIP TABLE (Spans 100% of usable page width)               */
+  /* 4. PROFESSIONAL TRIP ACCOUNTING TABLE                                      */
   /* ========================================================================== */
-  const tableStartY = cardsY + cardH * 2 + cardGap + 12;
+  const tableStartY = cardsY + cardH * 2 + cardGap + 10;
 
   // Proportional column widths summing exactly to contentWidth (555.28 pt)
-  // Date: 58 | Vehicle: 72 | Income: 54 | Diesel: 50 | Driver: 48 | Other: 112 | EMI: 48 | Expense: 55 | Profit: 58.28
+  // Date: 56 | Vehicle: 80 | Income: 54 | Diesel: 50 | Driver: 48 | Other: 106 | EMI: 44 | Expense: 55 | Profit: 62.28
   const colWidths = {
-    date: 58,
-    vehicle: 72,
+    date: 56,
+    vehicle: 80,
     income: 54,
     diesel: 50,
     driver: 48,
-    other: 112,
-    emi: 48,
+    other: 106,
+    emi: 44,
     expense: 55,
-    profit: contentWidth - (58 + 72 + 54 + 50 + 48 + 112 + 48 + 55), // 58.28 pt
+    profit: contentWidth - (56 + 80 + 54 + 50 + 48 + 106 + 44 + 55), // 62.28 pt
   };
 
   autoTable(doc, {
@@ -416,7 +475,7 @@ export function buildReportPdf(report: ReportPayload, companyName: string, symbo
     styles: {
       font: FONT,
       fontSize: 8,
-      cellPadding: { top: 7, bottom: 7, left: 3.5, right: 3.5 },
+      cellPadding: { top: 6, bottom: 6, left: 3.5, right: 3.5 },
       textColor: [15, 23, 42],
       lineColor: [220, 230, 242],
       lineWidth: 0.5,
@@ -426,14 +485,14 @@ export function buildReportPdf(report: ReportPayload, companyName: string, symbo
     headStyles: {
       font: FONT,
       fontStyle: "bold",
-      fillColor: [15, 56, 105], // Deep navy transport blue (#0f3869)
-      textColor: [255, 255, 255], // Crisp white header text
+      fillColor: [15, 38, 75], // Deep navy transport blue
+      textColor: [255, 255, 255],
       fontSize: 8,
       halign: "right",
-      cellPadding: { top: 7, bottom: 7, left: 3.5, right: 3.5 },
+      cellPadding: { top: 6, bottom: 6, left: 3.5, right: 3.5 },
     },
     alternateRowStyles: {
-      fillColor: [248, 250, 253], // Light alternating rows
+      fillColor: [249, 250, 253],
     },
     columnStyles: {
       0: { cellWidth: colWidths.date, halign: "center", fontStyle: "bold" },
@@ -460,17 +519,25 @@ export function buildReportPdf(report: ReportPayload, companyName: string, symbo
       ],
     ],
     body: report.rows.map((r) => {
-      // Itemized other expenses matching reference format: "Driver salary:\n₹1,000"
+      // Single clean line per other expense item (e.g. "Toll Tax: ₹500")
       const itemized = (r.otherExpenseItems ?? [])
         .filter((item) => item.name || Number(item.amount) > 0)
-        .map((item) => `${item.name || "Expense"}:\n${money(item.amount)}`)
+        .map((item) => `${item.name || "Expense"}: ${money(item.amount)}`)
         .join("\n");
 
       const otherCell = itemized || (r.otherExpenses > 0 ? money(r.otherExpenses) : "₹0");
 
+      const vehicleLines = [r.vehicleName];
+      if (r.route) vehicleLines.push(`Route: ${r.route}`);
+      if (r.driverName) vehicleLines.push(`Driver: ${r.driverName}`);
+      if (r.totalKm && r.dieselLiters && r.dieselLiters > 0) {
+        vehicleLines.push(`${(r.totalKm / r.dieselLiters).toFixed(1)} km/L (${r.totalKm} km)`);
+      }
+      const vehicleCell = vehicleLines.join("\n");
+
       return [
         formatDateShort(r.date),
-        r.vehicleName,
+        vehicleCell,
         money(r.income),
         money(r.diesel),
         money(r.driverPayment),
@@ -496,14 +563,13 @@ export function buildReportPdf(report: ReportPayload, companyName: string, symbo
     footStyles: {
       font: FONT,
       fontStyle: "bold",
-      fillColor: [224, 242, 254], // Soft sky blue total row (#e0f2fe)
-      textColor: [15, 56, 105], // Navy blue bold total text (#0f3869)
+      fillColor: [224, 242, 254], // Soft sky blue total row
+      textColor: [15, 56, 105], // Navy blue bold total text
       fontSize: 8.5,
       halign: "right",
-      cellPadding: { top: 7, bottom: 7, left: 3.5, right: 3.5 },
+      cellPadding: { top: 6, bottom: 6, left: 3.5, right: 3.5 },
     },
     didParseCell: (data) => {
-      // Header alignments
       if (data.section === "head") {
         if (data.column.index === 0) data.cell.styles.halign = "center";
         else if (data.column.index === 1 || data.column.index === 5)
@@ -511,9 +577,7 @@ export function buildReportPdf(report: ReportPayload, companyName: string, symbo
         else data.cell.styles.halign = "right";
       }
 
-      // Body styling
       if (data.section === "body") {
-        // Profit color: Green for profit, Red for loss
         if (data.column.index === 8) {
           const rowObj = report.rows[data.row.index];
           if (rowObj) {
@@ -522,14 +586,12 @@ export function buildReportPdf(report: ReportPayload, companyName: string, symbo
         }
       }
 
-      // Footer styling
       if (data.section === "foot") {
         if (data.column.index === 0) data.cell.styles.halign = "center";
         else if (data.column.index === 1) data.cell.styles.halign = "center";
         else if (data.column.index === 5) data.cell.styles.halign = "center";
         else data.cell.styles.halign = "right";
 
-        // Green net profit in total row
         if (data.column.index === 8) {
           data.cell.styles.textColor = s.profit >= 0 ? [22, 163, 74] : [220, 38, 38];
         }
@@ -538,7 +600,163 @@ export function buildReportPdf(report: ReportPayload, companyName: string, symbo
   });
 
   /* ========================================================================== */
-  /* 5. FOOTER & MULTI-PAGE NUMBERING                                           */
+  /* 5. CLOSING FINANCIAL RATIOS, AUDIT DECLARATION & SIGNATURES                */
+  /* ========================================================================== */
+  const lastTableY =
+    (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ??
+    tableStartY + 120;
+
+  const closingBlockHeight = 156;
+  let closingY = lastTableY + 12;
+
+  // If table leaves insufficient room before footer margin, push to a clean page
+  if (pageHeight - lastTableY < closingBlockHeight + 44) {
+    doc.addPage();
+    closingY = MARGIN + 16;
+  }
+
+  // 5A. Three Financial Breakdown Ratio Cards across contentWidth
+  const ratioCols = 3;
+  const ratioGap = 8;
+  const ratioW = (contentWidth - ratioGap * (ratioCols - 1)) / ratioCols; // ~179.7 pt
+  const ratioH = 46;
+
+  const profitMargin = s.income > 0 ? ((s.profit / s.income) * 100).toFixed(1) : "0.0";
+  const fuelRatio = s.income > 0 ? ((s.diesel / s.income) * 100).toFixed(1) : "0.0";
+  const avgProfitPerTrip = s.trips > 0 ? Math.round(s.profit / s.trips) : 0;
+
+  // Card 1: Operating Profit Margin
+  doc.setFillColor(240, 253, 244);
+  doc.setDrawColor(187, 247, 208);
+  doc.setLineWidth(0.8);
+  doc.roundedRect(MARGIN, closingY, ratioW, ratioH, 4, 4, "FD");
+
+  doc.setFont(FONT, "bold");
+  doc.setFontSize(7);
+  doc.setTextColor(21, 128, 61);
+  doc.text("NET PROFIT MARGIN", MARGIN + 10, closingY + 14);
+
+  doc.setFont(FONT, "bold");
+  doc.setFontSize(12);
+  doc.setTextColor(22, 163, 74);
+  doc.text(`${profitMargin}% Margin`, MARGIN + 10, closingY + 29);
+
+  doc.setFont(FONT, "normal");
+  doc.setFontSize(7);
+  doc.setTextColor(100, 116, 139);
+  doc.text(`Total Profit: ${money(s.profit)}`, MARGIN + 10, closingY + 39);
+
+  // Card 2: Fuel Expense Ratio
+  const c2X = MARGIN + ratioW + ratioGap;
+  doc.setFillColor(255, 251, 235);
+  doc.setDrawColor(253, 230, 138);
+  doc.roundedRect(c2X, closingY, ratioW, ratioH, 4, 4, "FD");
+
+  doc.setFont(FONT, "bold");
+  doc.setFontSize(7);
+  doc.setTextColor(180, 83, 9);
+  doc.text("FUEL CONSUMPTION RATIO", c2X + 10, closingY + 14);
+
+  doc.setFont(FONT, "bold");
+  doc.setFontSize(12);
+  doc.setTextColor(180, 83, 9);
+  doc.text(`${fuelRatio}% of Revenue`, c2X + 10, closingY + 29);
+
+  doc.setFont(FONT, "normal");
+  doc.setFontSize(7);
+  doc.setTextColor(100, 116, 139);
+  doc.text(`Total Fuel: ${money(s.diesel)}`, c2X + 10, closingY + 39);
+
+  // Card 3: Avg Profit Per Run
+  const c3X = MARGIN + (ratioW + ratioGap) * 2;
+  doc.setFillColor(239, 246, 255);
+  doc.setDrawColor(191, 219, 254);
+  doc.roundedRect(c3X, closingY, ratioW, ratioH, 4, 4, "FD");
+
+  doc.setFont(FONT, "bold");
+  doc.setFontSize(7);
+  doc.setTextColor(30, 64, 175);
+  doc.text("AVG PROFIT PER TRIP", c3X + 10, closingY + 14);
+
+  doc.setFont(FONT, "bold");
+  doc.setFontSize(12);
+  doc.setTextColor(30, 64, 175);
+  doc.text(money(avgProfitPerTrip), c3X + 10, closingY + 29);
+
+  doc.setFont(FONT, "normal");
+  doc.setFontSize(7);
+  doc.setTextColor(100, 116, 139);
+  doc.text(`Average across ${s.trips} completed run(s)`, c3X + 10, closingY + 39);
+
+  // 5B. Audit & Accounting Declaration Banner
+  const declY = closingY + ratioH + 8;
+  const declH = 26;
+
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(226, 232, 240);
+  doc.setLineWidth(0.75);
+  doc.roundedRect(MARGIN, declY, contentWidth, declH, 4, 4, "FD");
+
+  doc.setFont(FONT, "bold");
+  doc.setFontSize(6.8);
+  doc.setTextColor(71, 85, 105);
+  doc.text("AUDIT & SETTLEMENT DECLARATION:", MARGIN + 10, declY + 11);
+
+  doc.setFont(FONT, "normal");
+  doc.setFontSize(6.6);
+  doc.setTextColor(100, 116, 139);
+  doc.text(
+    `This computer-generated accounting statement certifies all trip revenues, fuel vouchers, driver payments, toll/other expenses, and EMI shares for ${report.vehicleLabel}. All ledger entries have been audited and reconciled for official records.`,
+    MARGIN + 10,
+    declY + 20,
+    { maxWidth: contentWidth - 20 },
+  );
+
+  // 5C. Corporate Signatures & Authorization Block
+  const sigY = declY + declH + 12;
+  const sigColW = (contentWidth - 24) / 3;
+
+  // Signatory 1: Prepared By
+  const s1X = MARGIN;
+  doc.setFont(FONT, "bold");
+  doc.setFontSize(7.5);
+  doc.setTextColor(71, 85, 105);
+  doc.text("Prepared By:", s1X, sigY + 10);
+  doc.setDrawColor(203, 213, 225);
+  doc.setLineWidth(0.8);
+  doc.line(s1X, sigY + 36, s1X + sigColW - 10, sigY + 36);
+  doc.setFont(FONT, "normal");
+  doc.setFontSize(7);
+  doc.setTextColor(148, 163, 184);
+  doc.text("Accounts Executive / Operator", s1X, sigY + 46);
+
+  // Signatory 2: Verified By
+  const s2X = MARGIN + sigColW + 12;
+  doc.setFont(FONT, "bold");
+  doc.setFontSize(7.5);
+  doc.setTextColor(71, 85, 105);
+  doc.text("Verified By:", s2X, sigY + 10);
+  doc.line(s2X, sigY + 36, s2X + sigColW - 10, sigY + 36);
+  doc.setFont(FONT, "normal");
+  doc.setFontSize(7);
+  doc.setTextColor(148, 163, 184);
+  doc.text("Fleet Operations Manager", s2X, sigY + 46);
+
+  // Signatory 3: Authorized Signatory & Seal
+  const s3X = MARGIN + (sigColW + 12) * 2;
+  doc.setFont(FONT, "bold");
+  doc.setFontSize(7.5);
+  doc.setTextColor(71, 85, 105);
+  doc.text("Authorized Signatory:", s3X, sigY + 10);
+  doc.line(s3X, sigY + 36, s3X + sigColW, sigY + 36);
+  doc.setFont(FONT, "bold");
+  doc.setFontSize(7);
+  doc.setTextColor(30, 58, 138);
+  const sealTitle = title.length > 26 ? title.slice(0, 24) + "…" : title;
+  doc.text(`For ${sealTitle} [Seal]`, s3X, sigY + 46);
+
+  /* ========================================================================== */
+  /* 6. FOOTER & MULTI-PAGE NUMBERING                                           */
   /* ========================================================================== */
   const totalPages = doc.getNumberOfPages();
   for (let i = 1; i <= totalPages; i += 1) {
@@ -563,7 +781,7 @@ export function buildReportPdf(report: ReportPayload, companyName: string, symbo
       align: "right",
     });
 
-    // Decorative bottom transport accent bar matching reference image
+    // Decorative bottom transport accent bar
     const bottomY = pageHeight - 11;
     const bottomH = 6;
     // Left navy segment (68%)

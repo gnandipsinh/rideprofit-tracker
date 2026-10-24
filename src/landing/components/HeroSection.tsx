@@ -85,7 +85,7 @@ export function HeroSection() {
         toast.error(error.message || "Failed to load demo account");
         return;
       }
-      toast.success("Welcome to Demo Mode! Exploring Gujarat Logistics Fleet.");
+      toast.success("Welcome to Demo Mode! Exploring Express Logistics Fleet.");
       await navigate({ to: "/" });
     } catch {
       toast.error("An error occurred starting demo account.");
@@ -137,22 +137,25 @@ export function HeroSection() {
               simple and powerful platform for transport business.
             </p>
 
-            {/* Dual CTAs */}
-            <div className="mt-8 flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
+            {/* CTAs */}
+            <div className="mt-8 flex flex-col sm:flex-row items-stretch sm:items-center gap-3.5">
               <Link
                 to="/auth"
                 search={{ mode: "register" }}
-                className="landing-btn-primary group flex items-center justify-center gap-2.5 rounded-2xl px-7 py-4 text-base font-bold"
+                className="landing-btn-primary group flex items-center justify-center gap-2.5 rounded-2xl px-6 py-4 text-base font-bold shadow-[0_0_25px_rgba(6,182,212,0.4)]"
               >
                 <span>Get Started Free</span>
                 <ArrowRight className="h-5 w-5 transition-transform duration-200 group-hover:translate-x-1" />
               </Link>
-              <Link
-                to="/auth"
-                className="landing-btn-glass flex items-center justify-center rounded-2xl px-7 py-4 text-base font-bold text-slate-200"
+              <button
+                type="button"
+                onClick={handleDemoLogin}
+                disabled={demoLoading}
+                className="landing-btn-glass flex items-center justify-center gap-2 rounded-2xl px-6 py-4 text-base font-bold text-cyan-300 hover:text-white border-cyan-500/30 hover:border-cyan-400 hover:bg-cyan-500/10 transition-all cursor-pointer disabled:opacity-60"
               >
-                Login to Account
-              </Link>
+                <Sparkles className="h-4 w-4 text-cyan-400 animate-pulse" />
+                <span>{demoLoading ? "Starting Demo…" : "Try Demo Account"}</span>
+              </button>
             </div>
 
             {/* Trust highlights */}

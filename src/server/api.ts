@@ -830,17 +830,23 @@ export async function handleApiFetch(request: Request): Promise<Response> {
               _id: `set_${demoUserId}`,
               userId: demoUserId,
               appName: "RideProfit Demo Fleet",
-              transportationName: "Gujarat Logistics Fleet",
-              businessName: "Gujarat Logistics Fleet",
+              transportationName: "Express Logistics Fleet",
+              businessName: "Express Logistics Fleet",
               currency: "INR",
               defaultVehicleId: null,
               fullName: "Demo Fleet Operator",
               mobileNumber: "9876543210",
-              address: "Ring Road, Transport Nagar, Ahmedabad",
+              address: "Ring Road, Transport Hub",
               contactNumber: "9876543210",
               businessEmail: "demo@rideprofit.app",
               updatedAt: new Date().toISOString(),
             });
+          } else if (
+            existingSettings.transportationName === "Gujarat Logistics Fleet" ||
+            !existingSettings.transportationName
+          ) {
+            existingSettings.transportationName = "Express Logistics Fleet";
+            existingSettings.businessName = "Express Logistics Fleet";
           }
 
           // Seed sample vehicles
@@ -895,6 +901,10 @@ export async function handleApiFetch(request: Request): Promise<Response> {
                   { name: "Toll Tax", amount: 500 },
                   { name: "Tea & Food", amount: 300 },
                 ],
+                route: "Ahmedabad ➔ Surat",
+                driverName: "Ramesh Patel",
+                totalKm: 280,
+                dieselLiters: 70,
                 notes: "Ahmedabad to Surat goods haul",
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString(),
@@ -913,6 +923,10 @@ export async function handleApiFetch(request: Request): Promise<Response> {
                   { name: "Toll Tax", amount: 800 },
                   { name: "Hamali & Unloading", amount: 400 },
                 ],
+                route: "Vadodara ➔ Rajkot",
+                driverName: "Kantilal",
+                totalKm: 290,
+                dieselLiters: 72,
                 notes: "Full container industrial machinery cargo",
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString(),
@@ -928,6 +942,10 @@ export async function handleApiFetch(request: Request): Promise<Response> {
                 emiShare: 1800,
                 otherExpenses: 600,
                 otherExpenseItems: [{ name: "Toll Plaza", amount: 600 }],
+                route: "Vadodara ➔ Bharuch",
+                driverName: "Sanjay Kumar",
+                totalKm: 90,
+                dieselLiters: 22,
                 notes: "Vadodara to Bharuch distribution",
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString(),
@@ -946,6 +964,10 @@ export async function handleApiFetch(request: Request): Promise<Response> {
                   { name: "Toll Tax", amount: 900 },
                   { name: "Puncture & Maintenance", amount: 600 },
                 ],
+                route: "Surat ➔ Mumbai Corridor",
+                driverName: "Sanjay Kumar",
+                totalKm: 320,
+                dieselLiters: 80,
                 notes: "Interstate delivery round trip",
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString(),
@@ -1370,6 +1392,10 @@ export async function handleApiFetch(request: Request): Promise<Response> {
           otherExpenseItems: items,
           otherExpenses: sumItems(items),
           notes: cleanString(body.notes, NOTES_MAX),
+          route: cleanString(body.route, 120),
+          driverName: cleanString(body.driverName, 80),
+          totalKm: body.totalKm ? toAmount(body.totalKm) : 0,
+          dieselLiters: body.dieselLiters ? toAmount(body.dieselLiters) : 0,
           createdAt: now,
           updatedAt: now,
         };
@@ -1453,6 +1479,16 @@ export async function handleApiFetch(request: Request): Promise<Response> {
             // Always derived from the items — one source of truth.
             otherExpenses: sumItems(items),
             notes: body.notes !== undefined ? cleanString(body.notes, NOTES_MAX) : existing.notes,
+            route: body.route !== undefined ? cleanString(body.route, 120) : (existing.route ?? ""),
+            driverName:
+              body.driverName !== undefined
+                ? cleanString(body.driverName, 80)
+                : (existing.driverName ?? ""),
+            totalKm: body.totalKm !== undefined ? toAmount(body.totalKm) : (existing.totalKm ?? 0),
+            dieselLiters:
+              body.dieselLiters !== undefined
+                ? toAmount(body.dieselLiters)
+                : (existing.dieselLiters ?? 0),
             updatedAt: new Date().toISOString(),
           };
           d.trips[index] = next;

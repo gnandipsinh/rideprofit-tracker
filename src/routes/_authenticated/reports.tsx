@@ -9,14 +9,18 @@ import {
   FileText,
   Filter,
   Fuel,
+  Gauge,
   IndianRupee,
   Layers,
+  MapPin,
+  MessageCircle,
   Receipt,
   RotateCcw,
   Share2,
   TrendingDown,
   TrendingUp,
   Truck,
+  User,
   UserCheck,
   Wallet,
   X,
@@ -45,6 +49,12 @@ import {
 import { useApp } from "@/lib/app-context";
 import { useReport } from "@/lib/queries";
 import { downloadReportPdf, shareReportPdf } from "@/lib/pdf";
+import {
+  calculateMileage,
+  formatReportWhatsAppMessage,
+  formatTripWhatsAppMessage,
+  openWhatsAppShare,
+} from "@/lib/whatsapp";
 import {
   formatDate,
   formatDateShort,
@@ -140,7 +150,7 @@ function ReportsPage() {
     const isAll = !activeParams.vehicleId || activeParams.vehicleId === ALL_VEHICLES;
 
     const rows = report.rows.filter((r) => {
-      if (!activeVehicleMap.has(r.vehicleId)) return false;
+      if (activeVehicleMap.size > 0 && !activeVehicleMap.has(r.vehicleId)) return false;
       if (!isAll && r.vehicleId !== activeParams.vehicleId) return false;
       return true;
     });
@@ -334,13 +344,30 @@ function ReportsPage() {
             </p>
           </div>
           {filteredReport && filteredReport.rows.length > 0 ? (
-            <Button
-              onClick={() => setPreviewOpen(true)}
-              className="h-10 sm:h-11 rounded-xl px-3.5 sm:px-5 font-bold shadow-[0_4px_20px_-2px_rgba(6,182,212,0.45)] bg-gradient-to-r from-cyan-500 to-blue-600 text-white hover:from-cyan-400 hover:to-blue-500 tap-scale shrink-0 text-xs sm:text-sm"
-            >
-              <FileSpreadsheet className="mr-1.5 h-4 w-4" />
-              <span>Generate PDF</span>
-            </Button>
+            <div className="flex items-center gap-2 shrink-0">
+              <Button
+                type="button"
+                onClick={() => {
+                  openWhatsAppShare(
+                    formatReportWhatsAppMessage(filteredReport, companyName, symbol),
+                  );
+                  toast.success("WhatsApp statement opened");
+                }}
+                variant="outline"
+                className="h-10 sm:h-11 rounded-xl px-3 sm:px-4 font-bold border-emerald-500/40 text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 hover:text-emerald-300 tap-scale text-xs sm:text-sm"
+              >
+                <MessageCircle className="mr-1.5 h-4 w-4" />
+                <span className="hidden xs:inline">WhatsApp Share</span>
+                <span className="xs:hidden">WhatsApp</span>
+              </Button>
+              <Button
+                onClick={() => setPreviewOpen(true)}
+                className="h-10 sm:h-11 rounded-xl px-3.5 sm:px-5 font-bold shadow-[0_4px_20px_-2px_rgba(6,182,212,0.45)] bg-gradient-to-r from-cyan-500 to-blue-600 text-white hover:from-cyan-400 hover:to-blue-500 tap-scale text-xs sm:text-sm"
+              >
+                <FileSpreadsheet className="mr-1.5 h-4 w-4" />
+                <span>Generate PDF</span>
+              </Button>
+            </div>
           ) : null}
         </div>
 
@@ -884,24 +911,69 @@ function ReportsPage() {
                       className="glass-card rounded-2xl p-3 border border-border/70 space-y-2.5"
                     >
                       <div className="flex items-start justify-between gap-2">
-                        <div>
+                        <div className="min-w-0">
                           <p className="text-xs font-extrabold text-foreground">
                             {formatDate(row.date)}
                           </p>
                           <p className="text-[0.7rem] text-primary/90 font-semibold truncate mt-0.5">
                             {row.vehicleName}
                           </p>
+                          {row.route ? (
+                            <div className="flex items-center gap-1 text-[0.68rem] text-cyan-400 font-medium mt-1 truncate">
+                              <MapPin className="h-3 w-3 shrink-0" />
+                              <span className="truncate">{row.route}</span>
+                            </div>
+                          ) : null}
+                          <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                            {row.driverName ? (
+                              <span className="inline-flex items-center gap-1 text-[0.65rem] text-muted-foreground bg-secondary/80 border border-border/60 px-1.5 py-0.5 rounded">
+                                <User className="h-2.5 w-2.5 text-primary" />
+                                {row.driverName}
+                              </span>
+                            ) : null}
+                            {row.totalKm && row.dieselLiters ? (
+                              <span className="inline-flex items-center gap-1 text-[0.65rem] font-semibold text-amber-400 bg-amber-500/10 border border-amber-500/30 px-1.5 py-0.5 rounded">
+                                <Gauge className="h-2.5 w-2.5" />
+                                {calculateMileage(row.totalKm, row.dieselLiters)} km/L
+                                <span className="text-[0.6rem] text-muted-foreground font-normal">
+                                  ({row.totalKm} km)
+                                </span>
+                              </span>
+                            ) : null}
+                          </div>
                         </div>
-                        <Badge
-                          className={cn(
-                            "text-xs font-bold border shrink-0",
-                            isProf
-                              ? "bg-success/15 text-success border-success/35"
-                              : "bg-destructive/15 text-destructive border-destructive/35",
-                          )}
-                        >
-                          {isProf ? "Profit" : "Loss"}: {money(row.profit)}
-                        </Badge>
+                        <div className="flex flex-col items-end gap-1.5 shrink-0">
+                          <Badge
+                            className={cn(
+                              "text-xs font-bold border shrink-0",
+                              isProf
+                                ? "bg-success/15 text-success border-success/35"
+                                : "bg-destructive/15 text-destructive border-destructive/35",
+                            )}
+                          >
+                            {isProf ? "Profit" : "Loss"}: {money(row.profit)}
+                          </Badge>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              openWhatsAppShare(
+                                formatTripWhatsAppMessage(
+                                  row,
+                                  row.vehicleName,
+                                  companyName,
+                                  symbol,
+                                ),
+                              );
+                              toast.success("WhatsApp opened for trip");
+                            }}
+                            className="h-7 px-2 text-[0.68rem] font-semibold text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/15 border-emerald-500/40 bg-emerald-500/5 rounded-lg"
+                          >
+                            <MessageCircle className="h-3 w-3 mr-1" />
+                            WhatsApp
+                          </Button>
+                        </div>
                       </div>
 
                       <div className="grid grid-cols-2 gap-2 text-xs pt-1 border-t border-border/50">
@@ -1012,8 +1084,30 @@ function ReportsPage() {
                             <td className="whitespace-nowrap px-3 py-3 font-semibold text-foreground">
                               {formatDateShort(row.date)}
                             </td>
-                            <td className="max-w-[11rem] truncate px-3 py-3 text-muted-foreground font-medium">
-                              {row.vehicleName}
+                            <td className="max-w-[13rem] px-3 py-3 text-muted-foreground font-medium">
+                              <div className="font-semibold text-foreground truncate">
+                                {row.vehicleName}
+                              </div>
+                              {row.route ? (
+                                <div className="text-[0.72rem] text-cyan-400 flex items-center gap-1 mt-0.5 font-medium truncate">
+                                  <MapPin className="h-3 w-3 shrink-0" />
+                                  <span className="truncate">{row.route}</span>
+                                </div>
+                              ) : null}
+                              <div className="flex flex-wrap items-center gap-1 mt-1 text-[0.68rem]">
+                                {row.driverName ? (
+                                  <span className="inline-flex items-center gap-1 text-muted-foreground bg-secondary/80 border border-border/50 px-1.5 py-0.5 rounded text-[0.65rem]">
+                                    <User className="h-2.5 w-2.5 text-primary" />
+                                    {row.driverName}
+                                  </span>
+                                ) : null}
+                                {row.totalKm && row.dieselLiters ? (
+                                  <span className="inline-flex items-center gap-1 font-semibold text-amber-400 bg-amber-500/10 border border-amber-500/30 px-1.5 py-0.5 rounded text-[0.65rem]">
+                                    <Gauge className="h-2.5 w-2.5" />
+                                    {calculateMileage(row.totalKm, row.dieselLiters)} km/L
+                                  </span>
+                                ) : null}
+                              </div>
                             </td>
                             <td className="whitespace-nowrap px-3 py-3 text-right font-extrabold text-primary tabular-nums">
                               {money(row.income)}
@@ -1058,13 +1152,36 @@ function ReportsPage() {
                             <td className="whitespace-nowrap px-3 py-3 text-right font-extrabold text-destructive tabular-nums">
                               {money(row.totalExpense)}
                             </td>
-                            <td
-                              className={cn(
-                                "whitespace-nowrap px-3 py-3 text-right font-extrabold tabular-nums",
-                                isProf ? "text-success" : "text-destructive",
-                              )}
-                            >
-                              {money(row.profit)}
+                            <td className="whitespace-nowrap px-3 py-3 text-right">
+                              <div
+                                className={cn(
+                                  "font-extrabold tabular-nums",
+                                  isProf ? "text-success" : "text-destructive",
+                                )}
+                              >
+                                {money(row.profit)}
+                              </div>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => {
+                                  openWhatsAppShare(
+                                    formatTripWhatsAppMessage(
+                                      row,
+                                      row.vehicleName,
+                                      companyName,
+                                      symbol,
+                                    ),
+                                  );
+                                  toast.success("WhatsApp opened for trip");
+                                }}
+                                title="Share trip via WhatsApp"
+                                className="h-6 px-1.5 text-[0.68rem] font-semibold text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/15 border border-emerald-500/30 rounded mt-1 inline-flex items-center gap-1"
+                              >
+                                <MessageCircle className="h-3 w-3" />
+                                <span>WhatsApp</span>
+                              </Button>
                             </td>
                           </tr>
                         );
@@ -1256,11 +1373,11 @@ function ReportsPage() {
                 <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 text-xs text-muted-foreground">
                   <p className="text-foreground font-semibold flex items-center gap-1.5">
                     <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
-                    Multi-Page & Itemized Other Expenses Included
+                    Executive A4 Transport Ledger & Audit Summary
                   </p>
                   <p className="mt-1 text-[0.7rem]">
-                    All {filteredReport.rows.length} trip rows, exact other expense descriptions,
-                    page numbers and official header will be rendered in selectable vector format.
+                    Includes vector header, performance KPIs, fuel ratios, itemized other expenses,
+                    and official authorization signature blocks.
                   </p>
                 </div>
               </div>
@@ -1275,6 +1392,23 @@ function ReportsPage() {
               >
                 Close
               </Button>
+              {filteredReport ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    openWhatsAppShare(
+                      formatReportWhatsAppMessage(filteredReport, companyName, symbol),
+                    );
+                    toast.success("WhatsApp statement opened");
+                  }}
+                  className="rounded-xl h-10 px-3.5 text-xs font-bold border-emerald-500/40 text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20"
+                >
+                  <MessageCircle className="mr-1.5 h-3.5 w-3.5" />
+                  WhatsApp
+                </Button>
+              ) : null}
               {canShare ? (
                 <Button
                   variant="outline"

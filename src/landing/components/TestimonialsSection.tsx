@@ -25,7 +25,7 @@ export function TestimonialsSection() {
     {
       id: 3,
       quote: "Now I can easily track income, expenses and real profit. Great application!",
-      name: "Rameshbhai Gohil",
+      name: "Ramesh Gohil",
       role: "Truck Owner",
       avatar: "/assets/landing/avatar-3.png",
       rating: 5,

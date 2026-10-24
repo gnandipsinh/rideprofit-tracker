@@ -56,6 +56,10 @@ export interface TripRecord {
   otherExpenseItems: OtherExpenseItem[];
   otherExpenses: number;
   notes: string;
+  route?: string;
+  driverName?: string;
+  totalKm?: number;
+  dieselLiters?: number;
   createdAt: string;
   updatedAt: string;
 }

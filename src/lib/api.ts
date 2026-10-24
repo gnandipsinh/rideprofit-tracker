@@ -67,12 +67,8 @@ async function requestBackend<T>(path: string, options: RequestInit = {}): Promi
 
   let token = "";
   try {
-    const sessionRes = await (
-      supabase.auth as unknown as {
-        getSession?: () => Promise<{ data: { session?: { access_token?: string } } }>;
-      }
-    ).getSession?.();
-    token = sessionRes?.data?.session?.access_token || "";
+    const sessionRes = await supabase.auth.getSession();
+    token = sessionRes.data.session?.access_token || "";
   } catch {
     /* ignore */
   }
@@ -242,6 +238,10 @@ export const api = {
         otherExpenseItems: items,
         otherExpenses: sumOtherExpenses(items),
         notes: sanitizeString(payload.notes ?? ""),
+        route: sanitizeString(payload.route ?? ""),
+        driverName: sanitizeString(payload.driverName ?? ""),
+        totalKm: Number(payload.totalKm) || 0,
+        dieselLiters: Number(payload.dieselLiters) || 0,
       }),
     });
     return created;
@@ -267,6 +267,10 @@ export const api = {
         otherExpenseItems: items,
         otherExpenses: sumOtherExpenses(items),
         notes: sanitizeString(payload.notes ?? ""),
+        route: sanitizeString(payload.route ?? ""),
+        driverName: sanitizeString(payload.driverName ?? ""),
+        totalKm: Number(payload.totalKm) || 0,
+        dieselLiters: Number(payload.dieselLiters) || 0,
       }),
     });
     return updated;
