@@ -1,8 +1,26 @@
-// Production-grade client authentication and session management
-// Strictly isolates data per registered user account with zero hardcoded or fake users.
-import { createClient } from "@supabase/supabase-js";
-import type { Database } from "./types";
-import { brokeredPreviewStorage } from "./previewAuthStorage";
+// Production-grade client authentication backed by Firebase Authentication & Cloud Firestore.
+// Strictly isolates data per authenticated Firebase user UID.
+import {
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  signOut as firebaseSignOut,
+  updatePassword,
+  updateProfile,
+  type User as FirebaseUser,
+} from "firebase/auth";
+import { doc, getDoc, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
+import { auth, db, googleAuthProvider, handleFirestoreError, OperationType } from "@/lib/firebase";
+import {
+  activateDemoSession,
+  clearDemoSession,
+  DEMO_EMAIL,
+  DEMO_UID,
+  demoStore,
+  isDemoSessionActive,
+} from "@/lib/demo-store";
 
 export interface RealUser {
   id: string;
@@ -24,100 +42,16 @@ export interface RealSession {
   user: RealUser;
 }
 
-const SESSION_STORAGE_KEY = "vcs.auth.active_session";
-const RESET_STORAGE_KEY = "vcs.auth.password_reset_email";
-const RESET_TOKEN_STORAGE_KEY = "vcs.auth.password_reset_token";
-
-const DEFAULT_EXPIRES_IN = 3600 * 24 * 30; // 30 days
-
-function authUrl(path: string): string {
-  const envUrl =
-    (typeof import.meta !== "undefined" && import.meta.env
-      ? (import.meta.env["VITE_API_URL"] as string | undefined)
-      : undefined) ||
-    (typeof process !== "undefined" && process?.env ? process.env["VITE_API_URL"] : undefined);
-  if (envUrl) return `${envUrl.trim().replace(/\/+$/, "")}${path}`;
-  return path;
-}
-
-type CodePurpose = "login" | "reset";
-
-interface ApiSessionPayload {
-  access_token?: string;
-  token_type?: string;
-  expires_in?: number;
-  user: Record<string, unknown>;
-}
-
-function buildSession(payload: ApiSessionPayload, meta: Record<string, unknown>): RealSession {
-  const expiresIn = payload.expires_in ?? DEFAULT_EXPIRES_IN;
-  const apiUser = payload.user as unknown as RealUser;
-  const user: RealUser = {
-    ...apiUser,
-    user_metadata: { ...meta, ...(apiUser.user_metadata ?? {}) },
-    app_metadata: { provider: "email" },
-  };
-  return {
-    access_token: payload.access_token ?? "",
-    token_type: payload.token_type ?? "bearer",
-    expires_in: expiresIn,
-    expires_at: Math.floor(Date.now() / 1000) + expiresIn,
-    refresh_token: payload.access_token ?? "",
-    user,
-  };
-}
-
-function readResetToken(): string {
-  if (typeof window === "undefined") return "";
-  try {
-    return window.localStorage.getItem(RESET_TOKEN_STORAGE_KEY) || "";
-  } catch {
-    return "";
-  }
-}
-
-function saveResetToken(token: string): void {
-  if (typeof window === "undefined") return;
-  try {
-    if (token) window.localStorage.setItem(RESET_TOKEN_STORAGE_KEY, token);
-    else window.localStorage.removeItem(RESET_TOKEN_STORAGE_KEY);
-  } catch {
-    /* ignore */
-  }
-}
-
-function loadActiveSession(): RealSession | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.localStorage.getItem(SESSION_STORAGE_KEY);
-    if (!raw) return null;
-    const session = JSON.parse(raw) as RealSession;
-    const now = Math.floor(Date.now() / 1000);
-    if (session.expires_at && session.expires_at <= now) {
-      window.localStorage.removeItem(SESSION_STORAGE_KEY);
-      return null;
-    }
-    return session;
-  } catch {
-    return null;
-  }
-}
-
-function saveActiveSession(session: RealSession | null): void {
-  if (typeof window === "undefined") return;
-  try {
-    if (session) {
-      window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session));
-    } else {
-      window.localStorage.removeItem(SESSION_STORAGE_KEY);
-    }
-  } catch {
-    /* ignore */
-  }
-}
-
 type AuthSubscriber = (event: string, session: RealSession | null) => void;
+type AuthError = { message: string; status: number };
+
+const DEFAULT_EXPIRES_IN = 3600;
 const subscribers = new Set<AuthSubscriber>();
+let listenerBound = false;
+let authInitialized = false;
+let lastTrackedUid: string | null = null;
+let suppressNextAuthEvent = false;
+const sessionMetaCache = new Map<string, { fullName?: string; mobile?: string }>();
 
 function notifySubscribers(event: string, session: RealSession | null) {
   subscribers.forEach((cb) => {
@@ -129,111 +63,270 @@ function notifySubscribers(event: string, session: RealSession | null) {
   });
 }
 
-type AuthError = { message: string; status: number };
+function toRealUser(fbUser: FirebaseUser): RealUser {
+  const cached = sessionMetaCache.get(fbUser.uid);
+  const fullName = cached?.fullName ?? fbUser.displayName ?? "";
+  const mobile = cached?.mobile ?? "";
+  return {
+    id: fbUser.uid,
+    email: fbUser.email ?? "",
+    fullName,
+    mobile,
+    user_metadata: {
+      full_name: fullName,
+      mobile,
+    },
+    app_metadata: {
+      provider: fbUser.providerData[0]?.providerId ?? "password",
+    },
+    created_at: fbUser.metadata.creationTime ?? new Date().toISOString(),
+  };
+}
 
-/**
- * Sends a 6-digit code for the given purpose. The payload returned to the UI
- * describes server configuration only (email provider / dev mode), never
- * whether the account exists.
- */
-async function requestEmailCode(
-  email: string,
-  purpose: CodePurpose,
-): Promise<{
-  data: { delivered: boolean; devMode: boolean; expiresInMinutes: number } | null;
-  error: AuthError | null;
-}> {
-  try {
-    const res = await fetch(authUrl("/api/auth/email-code"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, purpose }),
-    });
-    const json = await res.json().catch(() => null);
-    if (res.ok && json?.data) {
-      return {
-        data: {
-          delivered: Boolean(json.data.delivered),
-          devMode: Boolean(json.data.devMode),
-          expiresInMinutes: Number(json.data.expiresInMinutes) || 15,
-        },
-        error: null,
-      };
+async function toRealSession(fbUser: FirebaseUser): Promise<RealSession> {
+  const token = await fbUser.getIdToken().catch(() => fbUser.uid);
+  return {
+    access_token: token,
+    token_type: "bearer",
+    expires_in: DEFAULT_EXPIRES_IN,
+    expires_at: Math.floor(Date.now() / 1000) + DEFAULT_EXPIRES_IN,
+    refresh_token: fbUser.refreshToken ?? "",
+    user: toRealUser(fbUser),
+  };
+}
+
+function getDemoUser(): RealUser {
+  const settings = demoStore.getSettings();
+  const fullName = settings.fullName || "Demo Fleet Operator";
+  const mobile = settings.mobileNumber || "9876543210";
+  return {
+    id: DEMO_UID,
+    email: DEMO_EMAIL,
+    fullName,
+    mobile,
+    user_metadata: {
+      full_name: fullName,
+      mobile,
+      is_demo: true,
+    },
+    app_metadata: {
+      provider: "demo",
+    },
+    created_at: new Date().toISOString(),
+  };
+}
+
+function getDemoSession(): RealSession {
+  return {
+    access_token: `demo_${DEMO_UID}`,
+    token_type: "bearer",
+    expires_in: DEFAULT_EXPIRES_IN,
+    expires_at: Math.floor(Date.now() / 1000) + DEFAULT_EXPIRES_IN,
+    refresh_token: "",
+    user: getDemoUser(),
+  };
+}
+
+function bindAuthStateListener() {
+  if (listenerBound || typeof window === "undefined") return;
+  listenerBound = true;
+
+  void auth.authStateReady().then(() => {
+    authInitialized = true;
+    lastTrackedUid = auth.currentUser?.uid ?? null;
+  });
+
+  onAuthStateChanged(auth, (fbUser) => {
+    const nextUid = fbUser?.uid ?? null;
+    if (!authInitialized) {
+      authInitialized = true;
+      lastTrackedUid = nextUid;
+      return;
     }
-    return {
-      data: null,
-      error: {
-        message: json?.error?.message || json?.message || "Could not send the code.",
-        status: res.status,
-      },
-    };
-  } catch (e) {
-    return {
-      data: null,
-      error: {
-        message: e instanceof Error ? e.message : "Failed to connect to backend database.",
-        status: 500,
-      },
-    };
+    if (suppressNextAuthEvent) {
+      lastTrackedUid = nextUid;
+      return;
+    }
+    if (nextUid === lastTrackedUid) {
+      return;
+    }
+    const prevUid = lastTrackedUid;
+    lastTrackedUid = nextUid;
+
+    if (fbUser) {
+      clearDemoSession();
+      void toRealSession(fbUser).then((session) => {
+        notifySubscribers(prevUid === null ? "SIGNED_IN" : "USER_UPDATED", session);
+      });
+    } else if (prevUid !== null && !isDemoSessionActive()) {
+      notifySubscribers("SIGNED_OUT", null);
+    }
+  });
+}
+
+async function ensureUserProfileDoc(
+  fbUser: FirebaseUser,
+  overrides: { fullName?: string; mobile?: string } = {},
+): Promise<void> {
+  const userPath = `users/${fbUser.uid}`;
+  const userRef = doc(db, "users", fbUser.uid);
+  const cleanName = (overrides.fullName ?? fbUser.displayName ?? "").trim().slice(0, 80);
+  const cleanMobile = (overrides.mobile ?? "").trim().slice(0, 20);
+  const cleanEmail = (fbUser.email ?? "").trim().toLowerCase().slice(0, 255);
+
+  if (cleanName || cleanMobile) {
+    sessionMetaCache.set(fbUser.uid, { fullName: cleanName, mobile: cleanMobile });
+  }
+
+  try {
+    const snap = await getDoc(userRef);
+    if (!snap.exists()) {
+      await setDoc(userRef, {
+        uid: fbUser.uid,
+        email: cleanEmail || "operator@rideprofit.app",
+        fullName: cleanName,
+        mobile: cleanMobile,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      const existing = snap.data() as {
+        fullName?: string;
+        mobile?: string;
+      };
+      sessionMetaCache.set(fbUser.uid, {
+        fullName: cleanName || existing.fullName || "",
+        mobile: cleanMobile || existing.mobile || "",
+      });
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.toLowerCase().includes("permission")) {
+      handleFirestoreError(err, OperationType.WRITE, userPath);
+    }
+  }
+
+  // Ensure settings doc exists with clean per-account defaults
+  const settingsPath = `users/${fbUser.uid}/settings/app`;
+  const settingsRef = doc(db, "users", fbUser.uid, "settings", "app");
+  try {
+    const settingsSnap = await getDoc(settingsRef);
+    if (!settingsSnap.exists()) {
+      await setDoc(settingsRef, {
+        userId: fbUser.uid,
+        appName: "",
+        transportationName: "",
+        businessName: "",
+        currency: "INR",
+        defaultVehicleId: null,
+        fullName: cleanName,
+        mobileNumber: cleanMobile,
+        address: "",
+        contactNumber: cleanMobile,
+        businessEmail: "",
+        userRole: "Super Admin",
+        updatedAt: serverTimestamp(),
+      });
+    }
+  } catch (err) {
+    if (err instanceof Error && err.message.toLowerCase().includes("permission")) {
+      handleFirestoreError(err, OperationType.WRITE, settingsPath);
+    }
   }
 }
 
-/** Verifies a login code and persists the returned session. */
-async function verifyCodeAndSignIn(
-  email: string,
-  code: string,
-  purpose: CodePurpose,
-): Promise<{
-  data: { user: RealUser | null; session: RealSession | null };
-  error: AuthError | null;
-}> {
-  try {
-    const res = await fetch(authUrl("/api/auth/verify-code"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, code, purpose }),
-    });
-    const json = await res.json().catch(() => null);
-    if (res.ok && json?.data?.user && json?.data?.session) {
-      const session = buildSession(json.data.session, {
-        full_name: json.data.user.fullName,
-        mobile: json.data.user.mobile,
-      });
-      saveActiveSession(session);
-      notifySubscribers("SIGNED_IN", session);
-      return { data: { user: session.user, session }, error: null };
-    }
+function mapFirebaseAuthError(err: unknown, fallback: string): AuthError {
+  const code =
+    typeof err === "object" && err && "code" in err ? String((err as { code: unknown }).code) : "";
+  if (code === "auth/email-already-in-use") {
+    return { message: "An account with this email already exists. Please sign in.", status: 400 };
+  }
+  if (code === "auth/invalid-email") {
+    return { message: "Enter a valid email address.", status: 400 };
+  }
+  if (code === "auth/weak-password") {
     return {
-      data: { user: null, session: null },
-      error: {
-        message: json?.error?.message || json?.message || "Incorrect code. Please try again.",
-        status: res.status,
-      },
-    };
-  } catch (e) {
-    return {
-      data: { user: null, session: null },
-      error: {
-        message: e instanceof Error ? e.message : "Failed to connect to backend database.",
-        status: 500,
-      },
+      message: "Password must be at least 8 characters with letters and numbers.",
+      status: 400,
     };
   }
+  if (
+    code === "auth/invalid-credential" ||
+    code === "auth/wrong-password" ||
+    code === "auth/user-not-found" ||
+    code === "auth/invalid-login-credentials"
+  ) {
+    return { message: "Incorrect email or password. Please try again.", status: 401 };
+  }
+  if (code === "auth/too-many-requests") {
+    return { message: "Too many attempts. Please wait a minute before trying again.", status: 429 };
+  }
+  if (code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") {
+    return { message: "Sign-in window was closed before completing.", status: 400 };
+  }
+  if (code === "auth/popup-blocked") {
+    return {
+      message: "Browser blocked the Google sign-in popup. Please allow popups and try again.",
+      status: 400,
+    };
+  }
+  if (code === "auth/operation-not-allowed") {
+    return {
+      message:
+        "Email/Password sign-in is not yet enabled in Firebase Console. Click 'Continue with Google' to sign in immediately, or enable Email/Password under Authentication → Sign-in method.",
+      status: 400,
+    };
+  }
+  if (code === "auth/unauthorized-domain") {
+    return {
+      message:
+        "This app domain is not yet authorized in Firebase Authentication → Settings → Authorized domains.",
+      status: 400,
+    };
+  }
+  if (code === "auth/network-request-failed") {
+    return {
+      message: "Network error contacting authentication service. Please check your connection.",
+      status: 503,
+    };
+  }
+  if (code === "auth/requires-recent-login") {
+    return { message: "Please verify your current password before changing it.", status: 401 };
+  }
+  return {
+    message: err instanceof Error && err.message ? err.message : fallback,
+    status: 400,
+  };
 }
 
 function createProductionAuth() {
+  bindAuthStateListener();
+
   return {
     async getUser() {
-      const session = loadActiveSession();
-      if (session?.user) {
-        return { data: { user: session.user }, error: null };
+      await auth.authStateReady();
+      const fbUser = auth.currentUser;
+      if (fbUser) {
+        clearDemoSession();
+        return { data: { user: toRealUser(fbUser) }, error: null };
+      }
+      if (isDemoSessionActive()) {
+        return { data: { user: getDemoUser() }, error: null };
       }
       return { data: { user: null }, error: null };
     },
 
     async getSession() {
-      const session = loadActiveSession();
-      return { data: { session }, error: null };
+      await auth.authStateReady();
+      const fbUser = auth.currentUser;
+      if (fbUser) {
+        clearDemoSession();
+        const session = await toRealSession(fbUser);
+        return { data: { session }, error: null };
+      }
+      if (isDemoSessionActive()) {
+        return { data: { session: getDemoSession() }, error: null };
+      }
+      return { data: { session: null }, error: null };
     },
 
     async signUp({
@@ -251,297 +344,270 @@ function createProductionAuth() {
         typeof meta["full_name"] === "string" ? (meta["full_name"] as string).trim() : "";
       const mobile = typeof meta["mobile"] === "string" ? (meta["mobile"] as string).trim() : "";
 
-      try {
-        const res = await fetch(authUrl("/api/auth/register"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: normEmail, password, fullName, mobile }),
-        });
-        const json = await res.json().catch(() => null);
-        if (res.ok && json?.data?.user && json?.data?.session) {
-          const session = buildSession(json.data.session, { full_name: fullName, mobile, ...meta });
-          saveActiveSession(session);
-          notifySubscribers("SIGNED_IN", session);
-          return { data: { user: session.user, session }, error: null };
-        }
+      if (!password) {
         return {
           data: { user: null, session: null },
-          error: {
-            message: json?.error?.message || json?.message || "Could not create account.",
-            status: res.status,
-          },
+          error: { message: "Password is required.", status: 400 },
         };
+      }
+
+      try {
+        clearDemoSession();
+        suppressNextAuthEvent = true;
+        const cred = await createUserWithEmailAndPassword(auth, normEmail, password);
+        if (fullName) {
+          await updateProfile(cred.user, { displayName: fullName }).catch(() => undefined);
+        }
+        await ensureUserProfileDoc(cred.user, { fullName, mobile });
+        lastTrackedUid = cred.user.uid;
+        suppressNextAuthEvent = false;
+        const session = await toRealSession(cred.user);
+        notifySubscribers("SIGNED_IN", session);
+        return { data: { user: session.user, session }, error: null };
       } catch (e) {
+        suppressNextAuthEvent = false;
         return {
           data: { user: null, session: null },
-          error: {
-            message: e instanceof Error ? e.message : "Failed to connect to backend database.",
-            status: 500,
-          },
+          error: mapFirebaseAuthError(e, "Could not create account."),
         };
       }
     },
 
     async signInWithPassword({ email, password }: { email: string; password?: string }) {
       const normEmail = email.trim().toLowerCase();
+      if (!password) {
+        return {
+          data: { user: null, session: null },
+          error: { message: "Password is required.", status: 400 },
+        };
+      }
 
       try {
-        const res = await fetch(authUrl("/api/auth/login"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: normEmail, password }),
-        });
-        const json = await res.json().catch(() => null);
-        if (res.ok && json?.data?.user && json?.data?.session) {
-          const meta = {
-            full_name: json.data.user.fullName,
-            mobile: json.data.user.mobile,
-          };
-          const session = buildSession(json.data.session, meta);
-          saveActiveSession(session);
-          notifySubscribers("SIGNED_IN", session);
-          return { data: { user: session.user, session }, error: null };
-        }
-        return {
-          data: { user: null, session: null },
-          error: {
-            message: json?.error?.message || json?.message || "Invalid email or password.",
-            status: res.status,
-          },
-        };
+        clearDemoSession();
+        suppressNextAuthEvent = true;
+        const cred = await signInWithEmailAndPassword(auth, normEmail, password);
+        await ensureUserProfileDoc(cred.user);
+        lastTrackedUid = cred.user.uid;
+        suppressNextAuthEvent = false;
+        const session = await toRealSession(cred.user);
+        notifySubscribers("SIGNED_IN", session);
+        return { data: { user: session.user, session }, error: null };
       } catch (e) {
+        suppressNextAuthEvent = false;
         return {
           data: { user: null, session: null },
-          error: {
-            message: e instanceof Error ? e.message : "Failed to connect to backend database.",
-            status: 500,
-          },
+          error: mapFirebaseAuthError(e, "Incorrect email or password."),
         };
       }
     },
 
-    /**
-     * Instantly signs into the demo account with pre-seeded fleet & trips data.
-     */
+    async signInWithGoogle() {
+      try {
+        clearDemoSession();
+        suppressNextAuthEvent = true;
+        const cred = await signInWithPopup(auth, googleAuthProvider);
+        await ensureUserProfileDoc(cred.user);
+        lastTrackedUid = cred.user.uid;
+        suppressNextAuthEvent = false;
+        const session = await toRealSession(cred.user);
+        notifySubscribers("SIGNED_IN", session);
+        return { data: { user: session.user, session }, error: null };
+      } catch (e) {
+        suppressNextAuthEvent = false;
+        return {
+          data: { user: null, session: null },
+          error: mapFirebaseAuthError(e, "Google sign-in failed."),
+        };
+      }
+    },
+
     async signInAsDemo() {
       try {
-        const res = await fetch(authUrl("/api/auth/demo"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-        });
-        const json = await res.json().catch(() => null);
-        if (res.ok && json?.data?.user && json?.data?.session) {
-          const meta = {
-            full_name: json.data.user.fullName,
-            mobile: json.data.user.mobile,
-          };
-          const session = buildSession(json.data.session, meta);
-          saveActiveSession(session);
-          notifySubscribers("SIGNED_IN", session);
-          return { data: { user: session.user, session }, error: null };
+        if (auth.currentUser) {
+          suppressNextAuthEvent = true;
+          try {
+            await firebaseSignOut(auth);
+          } catch {
+            /* ignore */
+          }
+          lastTrackedUid = null;
+          suppressNextAuthEvent = false;
         }
-        return {
-          data: { user: null, session: null },
-          error: {
-            message: json?.error?.message || json?.message || "Failed to start demo session.",
-            status: res.status,
-          },
-        };
+        activateDemoSession();
+        const session = getDemoSession();
+        notifySubscribers("SIGNED_IN", session);
+        return { data: { user: session.user, session }, error: null };
       } catch (e) {
+        suppressNextAuthEvent = false;
         return {
           data: { user: null, session: null },
-          error: {
-            message: e instanceof Error ? e.message : "Failed to connect to backend database.",
-            status: 500,
-          },
+          error: mapFirebaseAuthError(e, "Failed to start demo session."),
         };
       }
     },
 
-    /**
-     * Requests a 6-digit verification code by email.
-     * The response never reveals whether the account exists.
-     */
-    async signInWithOtp({ email }: { email: string; options?: unknown }) {
-      return requestEmailCode(email, "login");
-    },
-
-    /** Verifies the 6-digit login code and starts a session. */
-    async verifyEmailCode({ email, code }: { email: string; code: string }) {
-      return verifyCodeAndSignIn(email, code, "login");
-    },
-
-    /** Verifies the 6-digit reset code and stores the short-lived reset token. */
-    async verifyResetCode({ email, code }: { email: string; code: string }) {
-      try {
-        const res = await fetch(authUrl("/api/auth/verify-code"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, code, purpose: "reset" }),
-        });
-        const json = await res.json().catch(() => null);
-        if (res.ok && json?.data?.resetToken) {
-          saveResetToken(json.data.resetToken);
-          return { data: { resetToken: json.data.resetToken }, error: null };
-        }
-        return {
-          data: { resetToken: null },
-          error: {
-            message: json?.error?.message || json?.message || "Incorrect code. Please try again.",
-            status: res.status,
-          },
-        };
-      } catch (e) {
-        return {
-          data: { resetToken: null },
-          error: {
-            message: e instanceof Error ? e.message : "Failed to connect to backend database.",
-            status: 500,
-          },
-        };
-      }
-    },
-
-    /** Sends a password-reset code (never reveals whether the email exists). */
     async resetPasswordForEmail(email: string, _options?: unknown) {
       const normEmail = email.trim().toLowerCase();
-      const result = await requestEmailCode(normEmail, "reset");
-      if (result.error) return result;
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(RESET_STORAGE_KEY, normEmail);
+      try {
+        await sendPasswordResetEmail(auth, normEmail);
+        return {
+          data: { delivered: true, devMode: false, expiresInMinutes: 60 },
+          error: null,
+        };
+      } catch (e) {
+        return {
+          data: null,
+          error: mapFirebaseAuthError(e, "Could not send password reset email."),
+        };
       }
-      saveResetToken("");
-      return result;
+    },
+
+    async signInWithOtp(_opts: { email: string; options?: unknown }) {
+      return {
+        data: null,
+        error: {
+          message: "Use password login or Continue with Google to sign in.",
+          status: 400,
+        },
+      };
+    },
+
+    async verifyEmailCode(_opts: { email: string; code: string }) {
+      return {
+        data: { user: null, session: null },
+        error: {
+          message: "Use password login or Continue with Google to sign in.",
+          status: 400,
+        },
+      };
+    },
+
+    async verifyResetCode(_opts: { email: string; code: string }) {
+      return {
+        data: { resetToken: null },
+        error: {
+          message: "Check your email inbox for the Firebase password reset link.",
+          status: 400,
+        },
+      };
     },
 
     async updateUser({ password, data }: { password?: string; data?: Record<string, unknown> }) {
-      const session = loadActiveSession();
-      const targetUser = session?.user;
-
-      let resetEmail = "";
-      if (!targetUser && typeof window !== "undefined") {
-        resetEmail = window.localStorage.getItem(RESET_STORAGE_KEY) || "";
+      await auth.authStateReady();
+      const fbUser = auth.currentUser;
+      if (!fbUser && isDemoSessionActive()) {
+        if (password) {
+          return {
+            data: { user: null },
+            error: {
+              message: "Demo account password cannot be modified. Create a personal account.",
+              status: 400,
+            },
+          };
+        }
+        const fullName =
+          typeof data?.["full_name"] === "string" ? data["full_name"].trim() : undefined;
+        const mobile = typeof data?.["mobile"] === "string" ? data["mobile"].trim() : undefined;
+        if (fullName !== undefined || mobile !== undefined) {
+          demoStore.updateSettings({
+            ...(fullName !== undefined ? { fullName } : {}),
+            ...(mobile !== undefined ? { mobileNumber: mobile } : {}),
+          });
+        }
+        const session = getDemoSession();
+        notifySubscribers("USER_UPDATED", session);
+        return { data: { user: session.user }, error: null };
       }
 
-      if (!targetUser && !resetEmail) {
+      if (!fbUser) {
         return { data: { user: null }, error: { message: "User not authenticated.", status: 401 } };
       }
 
       try {
-        if (targetUser) {
-          const res = await fetch(authUrl("/api/auth/update"), {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${session?.access_token || ""}`,
-            },
-            body: JSON.stringify({
-              password,
-              fullName: typeof data?.["full_name"] === "string" ? data["full_name"] : undefined,
-              mobile: typeof data?.["mobile"] === "string" ? data["mobile"] : undefined,
-              user_metadata: data,
-            }),
-          });
-          const json = await res.json().catch(() => null);
-          if (!res.ok) {
-            return {
-              data: { user: null },
-              error: {
-                message: json?.error?.message || json?.message || "Failed to update profile.",
-                status: res.status,
-              },
-            };
-          }
-          const updatedUser: RealUser = {
-            ...json.data.user,
-            user_metadata: { ...json.data.user.user_metadata, ...data },
-          };
-          const newSession: RealSession = {
-            ...(json.data.session || session!),
-            user: updatedUser,
-          };
-          saveActiveSession(newSession);
-          notifySubscribers("USER_UPDATED", newSession);
-          return { data: { user: updatedUser }, error: null };
-        } else if (resetEmail) {
-          const resetToken = readResetToken();
-          if (!resetToken) {
-            return {
-              data: { user: null },
-              error: { message: "Your reset code expired. Request a new one.", status: 401 },
-            };
-          }
-          const res = await fetch(authUrl("/api/auth/reset-password"), {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email: resetEmail, resetToken, newPassword: password }),
-          });
-          const json = await res.json().catch(() => null);
-          if (!res.ok) {
-            return {
-              data: { user: null },
-              error: {
-                message: json?.error?.message || json?.message || "Failed to reset password.",
-                status: res.status,
-              },
-            };
-          }
-          if (typeof window !== "undefined") {
-            window.localStorage.removeItem(RESET_STORAGE_KEY);
-          }
-          saveResetToken("");
-          return { data: { user: null }, error: null };
+        if (password) {
+          await updatePassword(fbUser, password);
         }
+        const fullName =
+          typeof data?.["full_name"] === "string" ? data["full_name"].trim() : undefined;
+        const mobile = typeof data?.["mobile"] === "string" ? data["mobile"].trim() : undefined;
+
+        if (fullName !== undefined) {
+          await updateProfile(fbUser, { displayName: fullName }).catch(() => undefined);
+        }
+
+        if (fullName !== undefined || mobile !== undefined) {
+          const userRef = doc(db, "users", fbUser.uid);
+          const snap = await getDoc(userRef);
+          const cur = (snap.exists() ? snap.data() : {}) as {
+            email?: string;
+            fullName?: string;
+            mobile?: string;
+          };
+          const nextName = (fullName ?? cur.fullName ?? fbUser.displayName ?? "").slice(0, 80);
+          const nextMobile = (mobile ?? cur.mobile ?? "").slice(0, 20);
+          const nextEmail = (
+            (fbUser.email ?? "").trim().toLowerCase() ||
+            cur.email ||
+            "operator@rideprofit.app"
+          ).slice(0, 255);
+          sessionMetaCache.set(fbUser.uid, { fullName: nextName, mobile: nextMobile });
+          if (snap.exists()) {
+            await updateDoc(userRef, {
+              email: nextEmail,
+              fullName: nextName,
+              mobile: nextMobile,
+              updatedAt: serverTimestamp(),
+            });
+          } else {
+            await setDoc(userRef, {
+              uid: fbUser.uid,
+              email: nextEmail,
+              fullName: nextName,
+              mobile: nextMobile,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            });
+          }
+        }
+
+        const session = await toRealSession(fbUser);
+        notifySubscribers("USER_UPDATED", session);
+        return { data: { user: session.user }, error: null };
       } catch (e) {
         return {
           data: { user: null },
-          error: {
-            message: e instanceof Error ? e.message : "Failed to connect to backend database.",
-            status: 500,
-          },
+          error: mapFirebaseAuthError(e, "Failed to update account."),
         };
       }
-
-      return { data: { user: null }, error: { message: "Account record not found.", status: 404 } };
     },
 
     async signOut() {
-      // Best-effort server-side revocation so the token can't be replayed from
-      // another device. Local state is cleared either way.
+      suppressNextAuthEvent = true;
+      clearDemoSession();
+      sessionMetaCache.clear();
       try {
-        const session = loadActiveSession();
-        const token = session?.access_token;
-        if (token) {
-          await fetch(authUrl("/api/auth/logout"), {
-            method: "POST",
-            headers: { Authorization: `Bearer ${token}` },
-          });
-        }
+        await firebaseSignOut(auth);
       } catch {
-        /* network failure must not block local sign-out */
+        /* ensure local subscribers still clear */
       }
-      saveActiveSession(null);
-      // This browser's pending password-reset context (email + code) belongs to
-      // the account that created it — drop it at the account boundary so the
-      // next signed-in account can never inherit it.
-      if (typeof window !== "undefined") {
-        try {
-          window.localStorage.removeItem(RESET_STORAGE_KEY);
-          saveResetToken("");
-        } catch {
-          /* storage unavailable */
-        }
-      }
+      lastTrackedUid = null;
+      suppressNextAuthEvent = false;
       notifySubscribers("SIGNED_OUT", null);
       return { error: null };
     },
 
     onAuthStateChange(callback: AuthSubscriber) {
+      bindAuthStateListener();
       subscribers.add(callback);
-      const session = loadActiveSession();
-      if (session) {
-        setTimeout(() => callback("INITIAL_SESSION", session), 0);
-      }
+      void auth.authStateReady().then(async () => {
+        if (auth.currentUser) {
+          clearDemoSession();
+          const session = await toRealSession(auth.currentUser);
+          callback("INITIAL_SESSION", session);
+        } else if (isDemoSessionActive()) {
+          callback("INITIAL_SESSION", getDemoSession());
+        }
+      });
       return {
         data: {
           subscription: {
@@ -557,101 +623,26 @@ function createProductionAuth() {
       return { data: {}, error: null };
     },
 
-    async getClaims(token?: string) {
-      const activeToken = token || loadActiveSession()?.access_token;
-      if (!activeToken) return { data: { claims: {} }, error: null };
-      try {
-        const parts = activeToken.split(".");
-        if (parts.length === 3 && parts[1]) {
-          const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-          const padLength = (4 - (base64.length % 4)) % 4;
-          const padded = base64 + "=".repeat(padLength);
-          const json = decodeURIComponent(
-            atob(padded)
-              .split("")
-              .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
-              .join(""),
-          );
-          const claims = JSON.parse(json) as Record<string, unknown>;
-          return { data: { claims }, error: null };
-        }
-      } catch {
-        /* fallback */
-      }
-      return { data: { claims: {} }, error: null };
+    async getClaims() {
+      await auth.authStateReady();
+      if (!auth.currentUser) return { data: { claims: {} }, error: null };
+      const res = await auth.currentUser.getIdTokenResult().catch(() => null);
+      return { data: { claims: res?.claims ?? {} }, error: null };
     },
   };
 }
 
-function isDummySupabaseUrl(url: string | undefined): boolean {
-  if (!url) return true;
-  return url.includes("your-project.supabase.co") || url.includes("localhost:54321");
-}
+let _authFacade: ReturnType<typeof createProductionAuth> | null = null;
 
-function createSupabaseClient() {
-  const SUPABASE_URL =
-    import.meta.env["VITE_SUPABASE_URL"] ||
-    (typeof process !== "undefined" && process?.env ? process.env["SUPABASE_URL"] : undefined);
-  const SUPABASE_PUBLISHABLE_KEY =
-    import.meta.env["VITE_SUPABASE_PUBLISHABLE_KEY"] ||
-    (typeof process !== "undefined" && process?.env
-      ? process.env["SUPABASE_PUBLISHABLE_KEY"]
-      : undefined);
-
-  const localAuth = createProductionAuth();
-  const useLocal = isDummySupabaseUrl(SUPABASE_URL) || !SUPABASE_PUBLISHABLE_KEY;
-
-  if (useLocal) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const builder: any = {
-      select: () => builder,
-      insert: () => builder,
-      update: () => builder,
-      delete: () => builder,
-      eq: () => builder,
-      order: () => builder,
-      limit: () => builder,
-      gte: () => builder,
-      lte: () => builder,
-      single: async () => ({ data: null, error: null }),
-      maybeSingle: async () => ({ data: null, error: null }),
-      then: (resolve: (v: unknown) => void) =>
-        Promise.resolve({ data: [], error: null }).then(resolve),
-    };
-    return {
-      auth: localAuth,
-      from: (_table: string) => builder,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any;
+function getAuthFacade() {
+  if (!_authFacade) {
+    _authFacade = createProductionAuth();
   }
-
-  const client = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
-    auth: {
-      storage: brokeredPreviewStorage(),
-      persistSession: true,
-      autoRefreshToken: true,
-    },
-  });
-
-  // Always bind the application's production authentication facade to client.auth
-  // so registration, sessions, and credentials consistently route through the PostgreSQL
-  // backend and TOKEN_SECRET HMAC tokens without split-brain or email-confirmation stalls.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return new Proxy(client as any, {
-    get(target, prop, receiver) {
-      if (prop === "auth") {
-        return localAuth;
-      }
-      return Reflect.get(target, prop, receiver);
-    },
-  });
+  return _authFacade;
 }
 
-let _supabase: ReturnType<typeof createSupabaseClient> | undefined;
-
-export const supabase = new Proxy({} as ReturnType<typeof createSupabaseClient>, {
-  get(_, prop, receiver) {
-    if (!_supabase) _supabase = createSupabaseClient();
-    return Reflect.get(_supabase, prop, receiver);
+export const supabase = {
+  get auth() {
+    return getAuthFacade();
   },
-});
+};

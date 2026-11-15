@@ -8,9 +8,12 @@ interface AppContextValue {
   activeVehicles: Vehicle[];
   vehiclesLoading: boolean;
   vehiclesError: Error | null;
+  refetchVehicles: () => Promise<unknown>;
   settings: AppSettings | undefined;
   appName: string;
   userName: string;
+  sessionEmail: string;
+  isDemo: boolean;
   symbol: string;
   selectedVehicleId: string;
   setSelectedVehicleId: (id: string) => void;
@@ -24,30 +27,74 @@ const AppContext = createContext<AppContextValue | null>(null);
 import { supabase } from "@/integrations/supabase/client";
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [hasSession, setHasSession] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    try {
-      const stored = window.localStorage.getItem("vcs.auth.active_session");
-      if (!stored) return false;
-      const parsed = JSON.parse(stored) as { access_token?: string } | null;
-      return Boolean(parsed?.access_token);
-    } catch {
-      return false;
-    }
-  });
+  const [hasSession, setHasSession] = useState<boolean>(false);
+  const [sessionEmail, setSessionEmail] = useState<string>("");
+  const [sessionName, setSessionName] = useState<string>("");
+  const [isDemo, setIsDemo] = useState<boolean>(false);
+
+  const [selectedVehicleId, setSelected] = useState<string>("");
 
   useEffect(() => {
+    let active = true;
+    const syncSession = (
+      session: {
+        access_token?: string;
+        user?: {
+          email?: string;
+          fullName?: string;
+          app_metadata?: Record<string, unknown>;
+          user_metadata?: Record<string, unknown>;
+        };
+      } | null,
+    ) => {
+      const authed = Boolean(session?.access_token);
+      setHasSession(authed);
+      setSessionEmail(session?.user?.email ?? "");
+      setSessionName(
+        session?.user?.fullName ||
+          (typeof session?.user?.user_metadata?.["full_name"] === "string"
+            ? session.user.user_metadata["full_name"]
+            : ""),
+      );
+      setIsDemo(
+        session?.user?.app_metadata?.["provider"] === "demo" ||
+          Boolean(session?.user?.user_metadata?.["is_demo"]),
+      );
+      if (!authed) setSelected("");
+    };
+
+    void supabase.auth
+      .getSession()
+      .then((res) => {
+        if (!active) return;
+        syncSession(res.data?.session ?? null);
+      })
+      .catch(() => undefined);
+
     const { data } = supabase.auth.onAuthStateChange(
-      (_event: string, session: { access_token?: string } | null) => {
-        setHasSession(Boolean(session?.access_token));
+      (
+        _event: string,
+        session: {
+          access_token?: string;
+          user?: {
+            email?: string;
+            fullName?: string;
+            app_metadata?: Record<string, unknown>;
+            user_metadata?: Record<string, unknown>;
+          };
+        } | null,
+      ) => {
+        syncSession(session);
       },
     );
-    return () => data.subscription.unsubscribe();
+    return () => {
+      active = false;
+      data.subscription.unsubscribe();
+    };
   }, []);
 
   const vehiclesQuery = useVehicles(hasSession);
   const settingsQuery = useSettings(hasSession);
-  const [selectedVehicleId, setSelected] = useState<string>("");
 
   const vehicles = useMemo(() => vehiclesQuery.data ?? [], [vehiclesQuery.data]);
   const activeVehicles = useMemo(() => vehicles.filter((v) => v.isActive), [vehicles]);
@@ -75,17 +122,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSelected(id);
   };
 
+  const refetchVehiclesFn = vehiclesQuery.refetch;
+
   const value = useMemo<AppContextValue>(() => {
     const selectedVehicle = activeVehicles.find((v) => v._id === selectedVehicleId) ?? null;
     const isAllVehicles = selectedVehicleId === ALL_VEHICLES;
+    const fallbackEmailName = sessionEmail ? (sessionEmail.split("@")[0] ?? "") : "";
+    const resolvedName = settings?.fullName || sessionName || fallbackEmailName;
+
     return {
       vehicles,
       activeVehicles,
       vehiclesLoading: vehiclesQuery.isLoading,
       vehiclesError: (vehiclesQuery.error as Error | null) ?? null,
+      refetchVehicles: () => refetchVehiclesFn(),
       settings,
       appName: settings?.transportationName || settings?.appName || "Vehicle Calculation System",
-      userName: settings?.fullName || "",
+      userName: resolvedName,
+      sessionEmail,
+      isDemo,
       symbol: currencySymbol(settings?.currency ?? "INR"),
       selectedVehicleId,
       setSelectedVehicleId,
@@ -103,9 +158,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     vehicles,
     activeVehicles,
     settings,
+    sessionName,
+    sessionEmail,
+    isDemo,
     selectedVehicleId,
     vehiclesQuery.isLoading,
     vehiclesQuery.error,
+    refetchVehiclesFn,
   ]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

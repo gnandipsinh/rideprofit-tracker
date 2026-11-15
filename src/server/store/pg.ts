@@ -667,6 +667,241 @@ export class PgStore implements Store {
     return row ? rowToUser(row) : null;
   }
 
+  /**
+   * One-time idempotent migration for accounts that originally stored data in
+   * legacy Supabase `public.vehicles / trips / app_settings` tables before the
+   * `rideprofit` schema was introduced. Only runs when the user currently has
+   * zero vehicles and zero trips in `rideprofit.*`, and silently skips when
+   * legacy `public.*` tables do not exist.
+   */
+  async importLegacyPublicSchemaForEmail(
+    userId: string,
+    email: string,
+  ): Promise<{ vehicles: number; trips: number }> {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail) return { vehicles: 0, trips: 0 };
+
+    const c = await this.pool.connect();
+    try {
+      const existingCheck = await c.query<{ has_data: boolean }>(
+        `SELECT (
+           EXISTS (SELECT 1 FROM rideprofit.vehicles WHERE user_id = $1)
+           OR EXISTS (SELECT 1 FROM rideprofit.trips WHERE user_id = $1)
+         ) AS has_data`,
+        [userId],
+      );
+      if (existingCheck.rows[0]?.has_data) {
+        return { vehicles: 0, trips: 0 };
+      }
+
+      const tablesCheck = await c.query<{ has_vehicles: boolean; has_profiles: boolean }>(
+        `SELECT
+           (to_regclass('public.vehicles') IS NOT NULL) AS has_vehicles,
+           (to_regclass('public.profiles') IS NOT NULL) AS has_profiles`,
+      );
+      if (!tablesCheck.rows[0]?.has_vehicles) {
+        return { vehicles: 0, trips: 0 };
+      }
+
+      const legacyUserIds = new Set<string>();
+      if (tablesCheck.rows[0]?.has_profiles) {
+        try {
+          const profRes = await c.query<{ id: string }>(
+            `SELECT id::text AS id FROM public.profiles WHERE lower(email) = $1`,
+            [normalizedEmail],
+          );
+          for (const row of profRes.rows) {
+            if (row.id) legacyUserIds.add(row.id);
+          }
+        } catch {
+          /* ignore if profiles columns differ */
+        }
+      }
+
+      try {
+        const authRes = await c.query<{ id: string }>(
+          `SELECT id::text AS id FROM auth.users WHERE lower(email) = $1`,
+          [normalizedEmail],
+        );
+        for (const row of authRes.rows) {
+          if (row.id) legacyUserIds.add(row.id);
+        }
+      } catch {
+        /* auth.users may not exist or be inaccessible */
+      }
+
+      if (legacyUserIds.size === 0) {
+        return { vehicles: 0, trips: 0 };
+      }
+
+      const legacyIds = Array.from(legacyUserIds);
+      const legacyVehiclesRes = await c.query<Record<string, unknown>>(
+        `SELECT * FROM public.vehicles WHERE user_id::text = ANY($1::text[])`,
+        [legacyIds],
+      );
+      if (legacyVehiclesRes.rows.length === 0) {
+        return { vehicles: 0, trips: 0 };
+      }
+
+      await c.query("BEGIN");
+      const vehicleIdMap = new Map<string, string>();
+      let importedVehicles = 0;
+      let importedTrips = 0;
+
+      for (const v of legacyVehiclesRes.rows) {
+        const rawId = String(v["id"] ?? v["_id"] ?? "");
+        if (!rawId) continue;
+        const nextId = `leg_${rawId}`;
+        vehicleIdMap.set(rawId, nextId);
+        const createdAt = v["created_at"]
+          ? toIso(v["created_at"] as string | Date)
+          : toIso(new Date());
+        const updatedAt = v["updated_at"] ? toIso(v["updated_at"] as string | Date) : createdAt;
+        await c.query(
+          `INSERT INTO rideprofit.vehicles
+             (_id, user_id, name, type, model, vehicle_number, notes, is_active, created_at, updated_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+           ON CONFLICT (_id) DO NOTHING`,
+          [
+            nextId,
+            userId,
+            String(v["name"] ?? ""),
+            String(v["type"] ?? "Truck") || "Truck",
+            String(v["model"] ?? ""),
+            String(v["vehicle_number"] ?? ""),
+            String(v["notes"] ?? ""),
+            v["is_active"] !== false,
+            createdAt,
+            updatedAt,
+          ],
+        );
+        importedVehicles++;
+      }
+
+      const hasTripsCheck = await c.query<{ has_trips: boolean }>(
+        `SELECT (to_regclass('public.trips') IS NOT NULL) AS has_trips`,
+      );
+      if (hasTripsCheck.rows[0]?.has_trips) {
+        const legacyTripsRes = await c.query<Record<string, unknown>>(
+          `SELECT * FROM public.trips WHERE user_id::text = ANY($1::text[])`,
+          [legacyIds],
+        );
+        for (const t of legacyTripsRes.rows) {
+          const rawTripId = String(t["id"] ?? t["_id"] ?? "");
+          const rawVehId = String(t["vehicle_id"] ?? "");
+          const mappedVehId = vehicleIdMap.get(rawVehId);
+          if (!rawTripId || !mappedVehId) continue;
+
+          const itemsRaw = Array.isArray(t["other_expense_items"]) ? t["other_expense_items"] : [];
+          const items = itemsRaw
+            .map((item) => {
+              const rec = item as { name?: unknown; amount?: unknown };
+              const amt = Math.max(0, Number(rec?.amount) || 0);
+              return { name: String(rec?.name ?? "").trim(), amount: Math.round(amt * 100) / 100 };
+            })
+            .filter((i) => i.name.length > 0 || i.amount > 0);
+          const otherExpenses =
+            Math.round(items.reduce((acc, i) => acc + i.amount, 0) * 100) / 100 ||
+            Math.max(0, Number(t["other_expenses"]) || 0);
+
+          const rawDate = String(t["date"] ?? "");
+          const date = /^\d{4}-\d{2}-\d{2}/.test(rawDate)
+            ? rawDate.slice(0, 10)
+            : new Date().toISOString().slice(0, 10);
+          const createdAt = t["created_at"]
+            ? toIso(t["created_at"] as string | Date)
+            : toIso(new Date());
+          const updatedAt = t["updated_at"] ? toIso(t["updated_at"] as string | Date) : createdAt;
+
+          await c.query(
+            `INSERT INTO rideprofit.trips
+               (_id, user_id, vehicle_id, date, income, diesel, driver_payment, emi_share,
+                other_expense_items, other_expenses, notes, route, driver_name, total_km, diesel_liters,
+                created_at, updated_at)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,$12,$13,$14,$15,$16,$17)
+             ON CONFLICT (_id) DO NOTHING`,
+            [
+              `leg_${rawTripId}`,
+              userId,
+              mappedVehId,
+              date,
+              Math.max(0, Number(t["income"]) || 0),
+              Math.max(0, Number(t["diesel"]) || 0),
+              Math.max(0, Number(t["driver_payment"]) || 0),
+              Math.max(0, Number(t["emi_share"]) || 0),
+              JSON.stringify(items),
+              otherExpenses,
+              String(t["notes"] ?? ""),
+              String(t["route"] ?? ""),
+              String(t["driver_name"] ?? ""),
+              Math.max(0, Number(t["total_km"]) || 0),
+              Math.max(0, Number(t["diesel_liters"]) || 0),
+              createdAt,
+              updatedAt,
+            ],
+          );
+          importedTrips++;
+        }
+      }
+
+      const hasSettingsCheck = await c.query<{ has_settings: boolean }>(
+        `SELECT (to_regclass('public.app_settings') IS NOT NULL) AS has_settings`,
+      );
+      if (hasSettingsCheck.rows[0]?.has_settings) {
+        const legacySetRes = await c.query<Record<string, unknown>>(
+          `SELECT * FROM public.app_settings WHERE user_id::text = ANY($1::text[]) LIMIT 1`,
+          [legacyIds],
+        );
+        const s = legacySetRes.rows[0];
+        if (s) {
+          const defaultVeh = s["default_vehicle_id"]
+            ? (vehicleIdMap.get(String(s["default_vehicle_id"])) ?? null)
+            : null;
+          const unified = String(
+            s["transportation_name"] || s["business_name"] || s["app_name"] || "",
+          ).trim();
+          await c.query(
+            `INSERT INTO rideprofit.settings
+               (_id, user_id, app_name, transportation_name, business_name, currency,
+                default_vehicle_id, full_name, mobile_number, address, contact_number,
+                business_email, user_role, updated_at)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+             ON CONFLICT (user_id) DO NOTHING`,
+            [
+              `set_${userId}`,
+              userId,
+              unified,
+              unified,
+              unified,
+              String(s["currency"] ?? "INR") || "INR",
+              defaultVeh,
+              String(s["full_name"] ?? ""),
+              String(s["mobile_number"] ?? ""),
+              String(s["address"] ?? ""),
+              String(s["contact_number"] ?? ""),
+              String(s["business_email"] ?? ""),
+              "Super Admin",
+              s["updated_at"] ? toIso(s["updated_at"] as string | Date) : toIso(new Date()),
+            ],
+          );
+        }
+      }
+
+      await c.query("COMMIT");
+      this.readCache = null;
+      return { vehicles: importedVehicles, trips: importedTrips };
+    } catch (err) {
+      await c.query("ROLLBACK").catch(() => undefined);
+      console.warn(
+        "[db] Legacy public schema recovery skipped:",
+        err instanceof Error ? err.message : String(err),
+      );
+      return { vehicles: 0, trips: 0 };
+    } finally {
+      c.release();
+    }
+  }
+
   async ping(): Promise<{ ok: boolean; message?: string }> {
     try {
       const res = await this.pool.query<{ alive: number }>("SELECT 1 as alive");

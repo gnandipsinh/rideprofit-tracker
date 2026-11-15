@@ -65,6 +65,7 @@ export function DashboardPage() {
     activeVehicles,
     vehiclesLoading,
     vehiclesError,
+    refetchVehicles,
   } = useApp();
   const [preset, setPreset] = useState<DashboardPreset>("month");
   const [custom, setCustom] = useState({
@@ -190,7 +191,7 @@ export function DashboardPage() {
               {userName ? `, ${userName}` : ""}
             </h2>
             <p className="text-xs sm:text-sm text-slate-400">
-              {appName || "Gujarat Logistics Fleet"} · Vehicle accounting & profit tracker
+              {appName || "RideProfit Tracker"} · Vehicle accounting & profit tracker
             </p>
           </div>
         </div>
@@ -258,7 +259,7 @@ export function DashboardPage() {
               <Button
                 type="button"
                 className="h-11 rounded-xl px-5 font-semibold bg-cyan-500 text-slate-950 hover:bg-cyan-400"
-                onClick={() => window.location.reload()}
+                onClick={() => void refetchVehicles()}
               >
                 Retry
               </Button>
@@ -298,6 +299,25 @@ export function DashboardPage() {
               <Skeleton key={i} className="h-28 rounded-2xl bg-[#10192A]" />
             ))}
           </div>
+        ) : tripsQuery.isError ? (
+          <EmptyState
+            icon={<RouteIcon className="h-6 w-6" />}
+            title="Could not load trip records"
+            description={
+              tripsQuery.error instanceof Error
+                ? tripsQuery.error.message
+                : "The trip service is temporarily unavailable."
+            }
+            action={
+              <Button
+                type="button"
+                className="h-11 rounded-xl px-5 font-semibold bg-cyan-500 text-slate-950 hover:bg-cyan-400"
+                onClick={() => void tripsQuery.refetch()}
+              >
+                Retry
+              </Button>
+            }
+          />
         ) : (
           <>
             <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">

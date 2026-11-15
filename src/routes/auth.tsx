@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import {
   Eye,
@@ -6,7 +6,6 @@ import {
   Loader2,
   Lock,
   Mail,
-  MailOpen,
   Phone,
   ShieldCheck,
   Sparkles,
@@ -21,22 +20,21 @@ import { supabase } from "@/integrations/supabase/client";
 import {
   GENERIC_CREDENTIALS_ERROR,
   GENERIC_ERROR,
-  RESEND_COOLDOWN_SECONDS,
-  codeSchema,
   emailSchema,
   loginSchema,
   registerSchema,
-  resetSchema,
   safeAuthMessage,
-  sendLoginCode,
   sendRecoveryEmail,
 } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/auth")({
   ssr: false,
-  validateSearch: (search: Record<string, unknown>): { mode?: string | undefined } => ({
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { mode?: string | undefined; redirect?: string | undefined } => ({
     mode: typeof search["mode"] === "string" ? (search["mode"] as string) : undefined,
+    redirect: typeof search["redirect"] === "string" ? (search["redirect"] as string) : undefined,
   }),
   head: () => ({
     meta: [
@@ -57,8 +55,12 @@ export const Route = createFileRoute("/auth")({
   component: AuthPage,
 });
 
-type Step = "login" | "register" | "email-login" | "code" | "forgot" | "reset";
-type CodePurpose = "login" | "reset";
+function isSafeInternalPath(path: string | undefined): path is string {
+  if (!path) return false;
+  return path.startsWith("/") && !path.startsWith("//") && !path.startsWith("/auth");
+}
+
+type Step = "login" | "register" | "forgot";
 type Errors = Record<string, string>;
 
 function PasswordField({
@@ -153,8 +155,10 @@ function Field({
 
 function AuthPage() {
   const navigate = useNavigate();
+  const searchParams = Route.useSearch();
 
   const [step, setStep] = useState<Step>(() => {
+    if (searchParams.mode === "register") return "register";
     if (typeof window !== "undefined") {
       const mode = new URLSearchParams(window.location.search).get("mode");
       if (mode === "register") return "register";
@@ -163,6 +167,7 @@ function AuthPage() {
   });
   const [busy, setBusy] = useState(false);
   const requestInFlight = useRef(false);
+  const navigatingRef = useRef(false);
   const [errors, setErrors] = useState<Errors>({});
   const [formError, setFormError] = useState("");
 
@@ -172,22 +177,58 @@ function AuthPage() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
 
-  const [codePurpose, setCodePurpose] = useState<CodePurpose>("login");
-  const [code, setCode] = useState("");
-  const [codeNotice, setCodeNotice] = useState("");
-  const [cooldown, setCooldown] = useState(0);
+  const [notice, setNotice] = useState("");
   const [demoLoading, setDemoLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+
+  const navigateHome = useCallback(() => {
+    if (navigatingRef.current) return;
+    navigatingRef.current = true;
+    const target = isSafeInternalPath(searchParams.redirect) ? searchParams.redirect : "/";
+    const [pathname, queryStr] = target.split("?");
+    const searchObj = queryStr ? Object.fromEntries(new URLSearchParams(queryStr)) : undefined;
+    void Promise.resolve(
+      navigate({
+        to: (pathname || "/") as "/",
+        ...(searchObj ? { search: searchObj as Record<string, string> } : {}),
+        replace: true,
+      }),
+    ).catch(() => {
+      navigatingRef.current = false;
+    });
+  }, [navigate, searchParams.redirect]);
+
+  async function handleGoogleLogin() {
+    setFormError("");
+    setGoogleLoading(true);
+    try {
+      const { error } = await supabase.auth.signInWithGoogle();
+      if (error) {
+        setFormError(error.message || "Google sign-in failed.");
+        return;
+      }
+      toast.success("Signed in with Google!");
+      navigateHome();
+    } catch {
+      setFormError("An error occurred during Google sign-in.");
+    } finally {
+      setGoogleLoading(false);
+    }
+  }
 
   async function handleDemoLogin() {
+    setFormError("");
     setDemoLoading(true);
     try {
       const { error } = await supabase.auth.signInAsDemo();
       if (error) {
-        toast.error(error.message || "Failed to load demo account");
+        const msg = error.message || "Failed to load demo account";
+        setFormError(msg);
+        toast.error(msg);
         return;
       }
       toast.success("Welcome to Demo Mode! Exploring Express Logistics Fleet.");
-      void navigate({ to: "/", replace: true });
+      navigateHome();
     } catch {
       toast.error("An error occurred starting demo account.");
     } finally {
@@ -196,36 +237,29 @@ function AuthPage() {
   }
 
   useEffect(() => {
-    if (cooldown <= 0) return;
-    const t = setTimeout(() => setCooldown((c) => c - 1), 1000);
-    return () => clearTimeout(t);
-  }, [cooldown]);
-
-  useEffect(() => {
+    let active = true;
     // If a session already exists there is nothing to do on this screen.
     supabase.auth.getUser().then((res: { data: { user: unknown } }) => {
-      if (res.data?.user) {
-        void Promise.resolve(navigate({ to: "/", replace: true })).catch(() => undefined);
+      if (active && res.data?.user) {
+        navigateHome();
       }
     });
 
     const { data } = supabase.auth.onAuthStateChange((event: string) => {
-      if (event === "PASSWORD_RECOVERY") {
-        setStep("reset");
-      } else if (event === "SIGNED_IN") {
-        // Single navigation point — runs outside any submit handler so a
-        // router redirect can never surface as a form error.
-        void Promise.resolve(navigate({ to: "/", replace: true })).catch(() => undefined);
+      if (event === "SIGNED_IN") {
+        navigateHome();
       }
     });
-    return () => data.subscription.unsubscribe();
-  }, [navigate]);
+    return () => {
+      active = false;
+      data.subscription.unsubscribe();
+    };
+  }, [navigateHome]);
 
   function reset(next: Step) {
     setErrors({});
     setFormError("");
-    setCode("");
-    setCodeNotice("");
+    setNotice("");
     setStep(next);
   }
 
@@ -268,7 +302,7 @@ function AuthPage() {
       setPassword("");
       setConfirmPassword("");
       toast.success("Account created successfully!");
-      void navigate({ to: "/", replace: true });
+      navigateHome();
     } catch {
       if (succeeded) return; // redirect raised after a successful registration
       setFormError(GENERIC_ERROR);
@@ -276,72 +310,6 @@ function AuthPage() {
       requestInFlight.current = false;
       setBusy(false);
     }
-  }
-
-  /**
-   * Shared sender for both the email-login code and the password-reset code.
-   * The server's response never tells us whether the account exists.
-   * Returns true when the code step should be shown.
-   */
-  async function sendCode(purpose: CodePurpose, opts: { resend?: boolean } = {}): Promise<boolean> {
-    const parsed = emailSchema.safeParse(email);
-    if (!parsed.success) {
-      setErrors({ email: parsed.error.issues[0]?.message ?? "Enter a valid email" });
-      return false;
-    }
-    if (requestInFlight.current) return false;
-    requestInFlight.current = true;
-    setBusy(true);
-    try {
-      const res =
-        purpose === "login"
-          ? await sendLoginCode(parsed.data)
-          : await sendRecoveryEmail(parsed.data);
-      if (res.error) {
-        setFormError(safeAuthMessage(res.error.message));
-        return false;
-      }
-
-      const info = res.data;
-      if (info?.devMode) {
-        setCodeNotice(
-          "Development mode: no email provider is configured, so the code was printed to the server console.",
-        );
-      } else if (info && !info.delivered) {
-        setFormError(
-          "Email delivery isn't configured on this server. Ask the administrator to set RESEND_API_KEY, or sign in with your password instead.",
-        );
-        return false;
-      } else {
-        setCodeNotice("");
-      }
-
-      setErrors({});
-      setFormError("");
-      if (!opts.resend) {
-        setCode("");
-        setStep("code");
-        toast.success("Verification code sent");
-      } else {
-        toast.success("A new code is on its way");
-      }
-      setCodePurpose(purpose);
-      setCooldown(RESEND_COOLDOWN_SECONDS);
-      return true;
-    } catch {
-      setFormError(GENERIC_ERROR);
-      return false;
-    } finally {
-      requestInFlight.current = false;
-      setBusy(false);
-    }
-  }
-
-  async function handleSendLoginCode(e: React.FormEvent) {
-    e.preventDefault();
-    setErrors({});
-    setFormError("");
-    await sendCode("login");
   }
 
   async function handleLogin(e: React.FormEvent) {
@@ -374,7 +342,7 @@ function AuthPage() {
       }
       succeeded = true;
       toast.success("Signed in successfully");
-      void navigate({ to: "/", replace: true });
+      navigateHome();
     } catch {
       if (succeeded) return; // redirect raised after a successful sign-in
       setFormError(GENERIC_ERROR);
@@ -388,91 +356,25 @@ function AuthPage() {
     e.preventDefault();
     setErrors({});
     setFormError("");
-    await sendCode("reset");
-  }
-
-  async function handleResendCode() {
-    if (cooldown > 0 || requestInFlight.current) return;
-    setErrors({});
-    setFormError("");
-    await sendCode(codePurpose, { resend: true });
-  }
-
-  async function handleVerifyCode(e: React.FormEvent) {
-    e.preventDefault();
-    setErrors({});
-    setFormError("");
-    const parsed = codeSchema.safeParse(code);
+    const parsed = emailSchema.safeParse(email);
     if (!parsed.success) {
-      setErrors({ code: parsed.error.issues[0]?.message ?? "Enter the 6-digit code" });
+      setErrors({ email: parsed.error.issues[0]?.message ?? "Enter a valid email" });
       return;
     }
     if (requestInFlight.current) return;
     requestInFlight.current = true;
     setBusy(true);
-    let succeeded = false;
     try {
-      if (codePurpose === "login") {
-        const { error } = await supabase.auth.verifyEmailCode({
-          email,
-          code: parsed.data,
-        });
-        if (error) {
-          setFormError(error.message || GENERIC_ERROR);
-          return;
-        }
-        succeeded = true;
-        toast.success("Signed in successfully");
-        void navigate({ to: "/", replace: true });
-      } else {
-        const { error } = await supabase.auth.verifyResetCode({
-          email,
-          code: parsed.data,
-        });
-        if (error) {
-          setFormError(error.message || GENERIC_ERROR);
-          return;
-        }
-        succeeded = true;
-        setCode("");
-        setStep("reset");
-        toast.success("Code verified — now choose a new password");
-      }
-    } catch {
-      if (succeeded) return;
-      setFormError(GENERIC_ERROR);
-    } finally {
-      requestInFlight.current = false;
-      setBusy(false);
-    }
-  }
-
-  async function handleResetPassword(e: React.FormEvent) {
-    e.preventDefault();
-    setErrors({});
-    setFormError("");
-    const parsed = resetSchema.safeParse({ password, confirmPassword });
-    if (!parsed.success) {
-      setErrors(zodErrors(parsed.error.issues));
-      return;
-    }
-    if (requestInFlight.current) return;
-    requestInFlight.current = true;
-    setBusy(true);
-    let succeeded = false;
-    try {
-      const { error } = await supabase.auth.updateUser({ password: parsed.data.password });
-      if (error) {
-        setFormError(error.message || safeAuthMessage(error.message));
+      const res = await sendRecoveryEmail(parsed.data);
+      if (res.error) {
+        setFormError(res.error.message || GENERIC_ERROR);
         return;
       }
-      succeeded = true;
-      toast.success("Password updated. Please sign in with your new password.");
-      setPassword("");
-      setConfirmPassword("");
-      reset("login");
+      toast.success("Password reset email sent! Check your inbox.");
+      setNotice(
+        `We sent a password reset link to ${parsed.data}. Check your inbox (and spam folder), then return here to sign in.`,
+      );
     } catch {
-      if (succeeded) return;
       setFormError(GENERIC_ERROR);
     } finally {
       requestInFlight.current = false;
@@ -481,28 +383,50 @@ function AuthPage() {
   }
 
   const heading: Record<Step, { title: string; sub: string }> = {
-    login: { title: "Welcome back", sub: "Sign in securely with your password." },
+    login: { title: "Welcome back", sub: "Sign in securely to your fleet accounting workspace." },
     register: {
       title: "Create your account",
-      sub: "Fill in your details to register instantly. No email confirmation required.",
-    },
-    "email-login": {
-      title: "Login with email code",
-      sub: "We'll email a 6-digit code to your registered email address.",
-    },
-    code: {
-      title: "Enter verification code",
-      sub: "We emailed you a 6-digit code. It expires in 15 minutes.",
+      sub: "Register with Google or email to sync your vehicles, trips, and settings.",
     },
     forgot: {
       title: "Forgot password",
-      sub: "We'll email you a 6-digit code to verify it's you.",
-    },
-    reset: {
-      title: "Set a new password",
-      sub: "Choose a strong password you haven't used before.",
+      sub: "We'll email you a secure password reset link.",
     },
   };
+
+  const googleButton = (
+    <Button
+      type="button"
+      variant="outline"
+      disabled={busy || googleLoading}
+      onClick={handleGoogleLogin}
+      className="h-12 w-full rounded-xl text-sm font-bold border-[#1C2B44] bg-[#0B111E] hover:bg-[#132137] text-white"
+    >
+      {googleLoading ? (
+        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+      ) : (
+        <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            fill="#4285F4"
+            d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"
+          />
+          <path
+            fill="#34A853"
+            d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.14C3.26 21.3 7.31 24 12 24z"
+          />
+          <path
+            fill="#FBBC05"
+            d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14z"
+          />
+          <path
+            fill="#EA4335"
+            d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96z"
+          />
+        </svg>
+      )}
+      Continue with Google
+    </Button>
+  );
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4 py-8 pb-[env(safe-area-inset-bottom)] sm:px-6 lg:px-8">
@@ -535,8 +459,33 @@ function AuthPage() {
           </div>
 
           {formError ? (
-            <div className="mb-4 rounded-xl border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive">
-              {formError}
+            <div className="mb-4 rounded-xl border border-destructive/40 bg-destructive/10 px-3.5 py-2.5 text-xs font-medium text-destructive space-y-2">
+              <p>{formError}</p>
+              {formError.toLowerCase().includes("sign-in method") ? (
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <a
+                    href="https://console.firebase.google.com/project/gen-lang-client-0656218186/authentication/providers"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center rounded-lg bg-slate-900/80 px-2.5 py-1 text-[0.7rem] font-semibold text-cyan-300 border border-cyan-500/30 hover:bg-slate-800"
+                  >
+                    Enable Email/Password in Firebase Console →
+                  </a>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {step !== "forgot" ? (
+            <div className="mb-5 space-y-3">
+              {googleButton}
+              <div className="relative flex items-center py-1">
+                <div className="flex-grow border-t border-border/60" />
+                <span className="mx-3 shrink-0 text-[0.68rem] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Or continue with email
+                </span>
+                <div className="flex-grow border-t border-border/60" />
+              </div>
             </div>
           ) : null}
 
@@ -581,15 +530,6 @@ function AuthPage() {
                 )}
                 Login
               </Button>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={busy}
-                onClick={() => reset("email-login")}
-                className="h-12 w-full rounded-xl text-sm font-bold"
-              >
-                <Mail className="mr-2 h-4 w-4" /> Login with email code
-              </Button>
               <p className="text-center text-xs text-muted-foreground">
                 New here?{" "}
                 <button
@@ -600,44 +540,6 @@ function AuthPage() {
                   Create an account
                 </button>
               </p>
-            </form>
-          ) : null}
-
-          {step === "email-login" ? (
-            <form onSubmit={handleSendLoginCode} className="space-y-4">
-              <Field
-                id="email-login-email"
-                label="Registered email"
-                icon={Mail}
-                type="email"
-                inputMode="email"
-                autoComplete="email"
-                placeholder="you@company.com"
-                value={email}
-                error={errors["email"]}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-              <Button
-                type="submit"
-                disabled={busy}
-                className="h-12 w-full rounded-xl text-sm font-bold"
-              >
-                {busy ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Mail className="mr-2 h-4 w-4" />
-                )}
-                Send login code
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={busy}
-                onClick={() => reset("login")}
-                className="h-12 w-full rounded-xl text-sm font-bold"
-              >
-                Back to Login
-              </Button>
             </form>
           ) : null}
 
@@ -718,6 +620,11 @@ function AuthPage() {
 
           {step === "forgot" ? (
             <form onSubmit={handleForgot} className="space-y-4">
+              {notice ? (
+                <div className="rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-3 py-2 text-xs font-medium text-cyan-300">
+                  {notice}
+                </div>
+              ) : null}
               <Field
                 id="forgot-email"
                 label="Registered email"
@@ -736,7 +643,7 @@ function AuthPage() {
                 className="h-12 w-full rounded-xl text-sm font-bold"
               >
                 {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                Send reset code
+                Send reset link
               </Button>
               <p className="text-center text-xs text-muted-foreground">
                 <button
@@ -747,100 +654,6 @@ function AuthPage() {
                   Back to sign in
                 </button>
               </p>
-            </form>
-          ) : null}
-
-          {step === "code" ? (
-            <form onSubmit={handleVerifyCode} className="space-y-4">
-              <div className="space-y-1 text-center">
-                <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-primary/15 text-primary">
-                  <MailOpen className="h-8 w-8" />
-                </div>
-                <p className="text-sm text-muted-foreground">Enter the 6-digit code we sent to</p>
-                {email ? (
-                  <p className="inline-block rounded-lg bg-secondary/50 px-3 py-1 text-xs font-medium text-foreground/80">
-                    {email}
-                  </p>
-                ) : null}
-              </div>
-
-              {codeNotice ? (
-                <div className="rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-3 py-2 text-xs font-medium text-cyan-300">
-                  {codeNotice}
-                </div>
-              ) : null}
-
-              <Field
-                id="verify-code"
-                label="Verification code"
-                icon={ShieldCheck}
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                maxLength={6}
-                placeholder="123456"
-                value={code}
-                error={errors["code"]}
-                onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-              />
-              <Button
-                type="submit"
-                disabled={busy}
-                className="h-12 w-full rounded-xl text-sm font-bold"
-              >
-                {busy ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <ShieldCheck className="mr-2 h-4 w-4" />
-                )}
-                Verify code
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={cooldown > 0 || busy}
-                onClick={handleResendCode}
-                className="h-12 w-full rounded-xl text-sm font-bold"
-              >
-                {cooldown > 0 ? `Resend code in ${cooldown}s` : "Resend code"}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={busy}
-                onClick={() => reset(codePurpose === "reset" ? "forgot" : "email-login")}
-                className="h-12 w-full rounded-xl text-sm font-bold"
-              >
-                Back
-              </Button>
-            </form>
-          ) : null}
-
-          {step === "reset" ? (
-            <form onSubmit={handleResetPassword} className="space-y-4">
-              <PasswordField
-                id="new-password"
-                label="New password"
-                autoComplete="new-password"
-                value={password}
-                onChange={setPassword}
-                error={errors["password"]}
-              />
-              <PasswordField
-                id="new-confirm"
-                label="Confirm new password"
-                autoComplete="new-password"
-                value={confirmPassword}
-                onChange={setConfirmPassword}
-                error={errors["confirmPassword"]}
-              />
-              <Button
-                type="submit"
-                disabled={busy}
-                className="h-12 w-full rounded-xl text-sm font-bold"
-              >
-                {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                Update password
-              </Button>
             </form>
           ) : null}
 
@@ -869,8 +682,8 @@ function AuthPage() {
         </div>
 
         <p className="mt-5 text-center text-[0.7rem] leading-relaxed text-muted-foreground">
-          Protected by two-step email verification. Passwords are hashed and never stored in plain
-          text.
+          Secured by Firebase Authentication &amp; Cloud Firestore. Your fleet records are private
+          to your account.
         </p>
       </div>
     </div>

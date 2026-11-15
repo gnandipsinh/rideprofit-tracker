@@ -9,7 +9,11 @@ export const Route = createFileRoute("/_authenticated")({
       if (location.pathname === "/") {
         throw redirect({ to: "/landing" });
       }
-      throw redirect({ to: "/auth" });
+      const fullPath = `${location.pathname}${location.searchStr || ""}`;
+      throw redirect({
+        to: "/auth",
+        search: { redirect: fullPath },
+      });
     }
     return { user: data.user };
   },

@@ -1,5 +1,21 @@
-import { supabase } from "@/integrations/supabase/client";
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  where,
+  writeBatch,
+  type DocumentData,
+} from "firebase/firestore";
+import { auth, db, handleFirestoreError, OperationType } from "@/lib/firebase";
+import { demoStore, isDemoSessionActive } from "@/lib/demo-store";
 import { profitOf, roundCurrency, sumOtherExpenses, totalExpenseOf } from "./calc";
+import { todayInput } from "./format";
 import type {
   AppSettings,
   OtherExpenseItem,
@@ -25,7 +41,7 @@ function sanitizeString(input: string, maxLength = 255): string {
 }
 
 function sanitizeEmail(input: string): string {
-  return sanitizeString(input).toLowerCase().slice(0, 255);
+  return sanitizeString(input, 255).toLowerCase();
 }
 
 function sanitizeNumber(input: string, maxLength = 20): string {
@@ -34,23 +50,128 @@ function sanitizeNumber(input: string, maxLength = 20): string {
 
 export { sanitizeString, sanitizeEmail, sanitizeNumber };
 
-async function getAuthenticatedUser() {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user?.id) {
-    return null;
-  }
-  return user;
+const ID_RE = /^[a-zA-Z0-9_-]{1,128}$/;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function isValidId(id: string): boolean {
+  return ID_RE.test(id);
 }
 
-/* ---------------- Real Database Backend Request Pipeline ---------------- */
+function newDocId(prefix: string): string {
+  const raw =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID().replace(/-/g, "")
+      : `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  return `${prefix}_${raw}`;
+}
+
+function toAmount(value: unknown, max = 1_000_000_000): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.round(Math.min(n, max) * 100) / 100;
+}
+
+function validDateOrToday(raw: unknown): string {
+  if (typeof raw === "string" && DATE_RE.test(raw)) {
+    const [yStr, mStr, dStr] = raw.split("-");
+    const y = Number(yStr);
+    const m = Number(mStr);
+    const d = Number(dStr);
+    const check = new Date(Date.UTC(y, m - 1, d));
+    if (check.getUTCFullYear() === y && check.getUTCMonth() === m - 1 && check.getUTCDate() === d) {
+      return raw;
+    }
+  }
+  return todayInput();
+}
+
+function tsToIso(val: unknown): string {
+  if (typeof val === "string" && val) return val;
+  if (val && typeof val === "object" && "toDate" in val) {
+    const fn = (val as { toDate?: () => Date }).toDate;
+    if (typeof fn === "function") {
+      return fn.call(val).toISOString();
+    }
+  }
+  return new Date().toISOString();
+}
+
+function docToVehicle(id: string, data: DocumentData): Vehicle {
+  return {
+    _id: id,
+    name: String(data["name"] ?? ""),
+    type: String(data["type"] ?? "Truck"),
+    model: String(data["model"] ?? ""),
+    vehicleNumber: String(data["vehicleNumber"] ?? ""),
+    notes: String(data["notes"] ?? ""),
+    isActive: data["isActive"] !== false,
+    createdAt: tsToIso(data["createdAt"]),
+    updatedAt: tsToIso(data["updatedAt"]),
+  };
+}
+
+function docToTrip(id: string, data: DocumentData): Trip {
+  const rawItems = Array.isArray(data["otherExpenseItems"]) ? data["otherExpenseItems"] : [];
+  const otherExpenseItems: OtherExpenseItem[] = rawItems.slice(0, 100).map((item) => ({
+    name: sanitizeString(String((item as { name?: unknown })?.name ?? ""), 255),
+    amount: toAmount((item as { amount?: unknown })?.amount),
+  }));
+  return {
+    _id: id,
+    vehicleId: String(data["vehicleId"] ?? ""),
+    date: String(data["date"] ?? todayInput()),
+    income: toAmount(data["income"]),
+    diesel: toAmount(data["diesel"]),
+    driverPayment: toAmount(data["driverPayment"]),
+    emiShare: toAmount(data["emiShare"]),
+    otherExpenseItems,
+    otherExpenses: toAmount(data["otherExpenses"]),
+    notes: String(data["notes"] ?? ""),
+    route: String(data["route"] ?? ""),
+    driverName: String(data["driverName"] ?? ""),
+    totalKm: toAmount(data["totalKm"], 10_000_000),
+    dieselLiters: toAmount(data["dieselLiters"], 1_000_000),
+    createdAt: tsToIso(data["createdAt"]),
+    updatedAt: tsToIso(data["updatedAt"]),
+  };
+}
+
+function docToSettings(uid: string, data: DocumentData): AppSettings {
+  return {
+    _id: `set_${uid}`,
+    appName: String(data["appName"] ?? ""),
+    transportationName: String(data["transportationName"] ?? ""),
+    businessName: String(data["businessName"] ?? ""),
+    currency: String(data["currency"] ?? "INR") || "INR",
+    defaultVehicleId:
+      typeof data["defaultVehicleId"] === "string" && data["defaultVehicleId"]
+        ? data["defaultVehicleId"]
+        : null,
+    fullName: String(data["fullName"] ?? ""),
+    mobileNumber: String(data["mobileNumber"] ?? ""),
+    address: String(data["address"] ?? ""),
+    contactNumber: String(data["contactNumber"] ?? ""),
+    businessEmail: String(data["businessEmail"] ?? ""),
+    userRole: String(data["userRole"] ?? "Super Admin") || "Super Admin",
+    updatedAt: tsToIso(data["updatedAt"]),
+  };
+}
+
+async function isDemoMode(): Promise<boolean> {
+  await auth.authStateReady();
+  return !auth.currentUser && isDemoSessionActive();
+}
+
+async function requireUid(): Promise<string> {
+  await auth.authStateReady();
+  const uid = auth.currentUser?.uid;
+  if (!uid) {
+    throw new ApiError("Authentication required", 401);
+  }
+  return uid;
+}
 
 export function getApiBaseUrl(): string {
-  const envUrl =
-    import.meta.env["VITE_API_URL"] ||
-    (typeof process !== "undefined" && process?.env ? process.env["VITE_API_URL"] : "");
-  if (envUrl) return envUrl.trim().replace(/\/+$/, "");
   if (typeof window !== "undefined" && window.location?.origin) {
     return window.location.origin;
   }
@@ -58,140 +179,184 @@ export function getApiBaseUrl(): string {
 }
 
 export function setApiBaseUrl(_url: string): void {
-  // Configured automatically via environment or window origin
+  // Configured via Firebase project configuration
 }
 
-async function requestBackend<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const baseUrl = getApiBaseUrl();
-  const url = baseUrl ? `${baseUrl.replace(/\/+$/, "")}${path}` : path;
-
-  let token = "";
-  try {
-    const sessionRes = await supabase.auth.getSession();
-    token = sessionRes.data.session?.access_token || "";
-  } catch {
-    /* ignore */
-  }
-
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options.headers,
-    },
-  });
-
-  if (!res.ok) {
-    if (res.status === 401 && token) {
-      // The token is expired, malformed or was revoked — drop the local session
-      // so the auth guard can send the user back to the sign-in screen.
-      try {
-        await supabase.auth.signOut();
-      } catch {
-        /* ignore */
-      }
-    }
-    const err = await res.json().catch(() => ({ message: res.statusText }));
-    throw new ApiError(
-      err?.message || err?.error?.message || `Request failed with status ${res.status}`,
-      res.status,
-    );
-  }
-
-  const json = await res.json();
-  return json.data !== undefined ? json.data : json;
+function normalizeExpenseItems(items: OtherExpenseItem[] | undefined): OtherExpenseItem[] {
+  return (items || [])
+    .slice(0, 100)
+    .filter((i) => (i.name || "").trim().length > 0 || Number(i.amount) > 0)
+    .map((i) => ({
+      name: sanitizeString(i.name, 255),
+      amount: toAmount(i.amount),
+    }));
 }
-
-/* ---------------- Strict Database-Only API ---------------- */
 
 export const api = {
   health: async (): Promise<{ status: string; database: string; url?: string }> => {
-    const baseUrl = getApiBaseUrl();
-    const endpoint = baseUrl ? `${baseUrl.replace(/\/+$/, "")}/api/health` : "/api/health";
-    try {
-      const res = await fetch(endpoint, { signal: AbortSignal.timeout(4000) });
-      if (res.ok) {
-        const json = await res.json();
-        if (json?.success !== false) {
-          return {
-            status: "connected",
-            database: json?.database || json?.data?.database || "persistent-database",
-            url: baseUrl || (typeof window !== "undefined" ? window.location?.origin : ""),
-          };
-        }
-      }
-    } catch {
-      /* fall through */
-    }
-    return { status: "error", database: "disconnected" };
+    const isOnline = typeof navigator === "undefined" || navigator.onLine !== false;
+    return {
+      status: isOnline ? "connected" : "error",
+      database: "cloud-firestore",
+      url: getApiBaseUrl(),
+    };
   },
 
   listVehicles: async (): Promise<Vehicle[]> => {
-    const user = await getAuthenticatedUser();
-    if (!user) return [];
-
-    const data = await requestBackend<Vehicle[]>("/api/vehicles");
-    if (!Array.isArray(data)) {
-      throw new ApiError("Invalid response from database", 500);
+    if (await isDemoMode()) {
+      return demoStore.listVehicles();
     }
-    return data;
+    await auth.authStateReady();
+    const uid = auth.currentUser?.uid;
+    if (!uid) return [];
+
+    const colPath = `users/${uid}/vehicles`;
+    try {
+      const q = query(collection(db, "users", uid, "vehicles"), where("userId", "==", uid));
+      const snap = await getDocs(q);
+      const list = snap.docs.map((d) => docToVehicle(d.id, d.data()));
+      list.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      return list;
+    } catch (err) {
+      handleFirestoreError(err, OperationType.LIST, colPath);
+    }
   },
 
   createVehicle: async (payload: VehiclePayload): Promise<Vehicle> => {
-    const user = await getAuthenticatedUser();
-    if (!user) throw new ApiError("Authentication required", 401);
-
-    const created = await requestBackend<Vehicle>("/api/vehicles", {
-      method: "POST",
-      body: JSON.stringify({
-        name: sanitizeString(payload.name),
-        type: sanitizeString(payload.type),
-        model: sanitizeString(payload.model ?? ""),
-        vehicleNumber: sanitizeString(payload.vehicleNumber ?? ""),
-        notes: sanitizeString(payload.notes ?? ""),
+    if (await isDemoMode()) {
+      return demoStore.createVehicle({
+        name: sanitizeString(payload.name, 255),
+        type: sanitizeString(payload.type, 80) || "Truck",
+        model: sanitizeString(payload.model ?? "", 255),
+        vehicleNumber: sanitizeString(payload.vehicleNumber ?? "", 64),
+        notes: sanitizeString(payload.notes ?? "", 2000),
         isActive: payload.isActive ?? true,
-      }),
-    });
-    return created;
+      });
+    }
+    const uid = await requireUid();
+    const id = newDocId("veh");
+    const docPath = `users/${uid}/vehicles/${id}`;
+    const record = {
+      userId: uid,
+      name: sanitizeString(payload.name, 255),
+      type: sanitizeString(payload.type, 80) || "Truck",
+      model: sanitizeString(payload.model ?? "", 255),
+      vehicleNumber: sanitizeString(payload.vehicleNumber ?? "", 64),
+      notes: sanitizeString(payload.notes ?? "", 2000),
+      isActive: payload.isActive ?? true,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    try {
+      await setDoc(doc(db, "users", uid, "vehicles", id), record);
+      const nowIso = new Date().toISOString();
+      return {
+        _id: id,
+        name: record.name,
+        type: record.type,
+        model: record.model,
+        vehicleNumber: record.vehicleNumber,
+        notes: record.notes,
+        isActive: record.isActive,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, docPath);
+    }
   },
 
   updateVehicle: async (id: string, payload: VehiclePayload): Promise<Vehicle> => {
-    const user = await getAuthenticatedUser();
-    if (!user) throw new ApiError("Authentication required", 401);
+    if (!isValidId(id)) throw new ApiError("Invalid vehicle ID", 400);
+    if (await isDemoMode()) {
+      return demoStore.updateVehicle(id, {
+        name: sanitizeString(payload.name, 255),
+        type: sanitizeString(payload.type, 80) || "Truck",
+        model: sanitizeString(payload.model ?? "", 255),
+        vehicleNumber: sanitizeString(payload.vehicleNumber ?? "", 64),
+        notes: sanitizeString(payload.notes ?? "", 2000),
+        isActive: Boolean(payload.isActive ?? true),
+      });
+    }
+    const uid = await requireUid();
 
-    const updated = await requestBackend<Vehicle>(`/api/vehicles/${id}`, {
-      method: "PUT",
-      body: JSON.stringify({
-        name: sanitizeString(payload.name),
-        type: sanitizeString(payload.type),
-        model: sanitizeString(payload.model ?? ""),
-        vehicleNumber: sanitizeString(payload.vehicleNumber ?? ""),
-        notes: sanitizeString(payload.notes ?? ""),
-        isActive: payload.isActive,
-      }),
-    });
-    return updated;
+    const docPath = `users/${uid}/vehicles/${id}`;
+    const ref = doc(db, "users", uid, "vehicles", id);
+    const patch = {
+      name: sanitizeString(payload.name, 255),
+      type: sanitizeString(payload.type, 80) || "Truck",
+      model: sanitizeString(payload.model ?? "", 255),
+      vehicleNumber: sanitizeString(payload.vehicleNumber ?? "", 64),
+      notes: sanitizeString(payload.notes ?? "", 2000),
+      isActive: Boolean(payload.isActive ?? true),
+      updatedAt: serverTimestamp(),
+    };
+
+    try {
+      await updateDoc(ref, patch);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) throw new ApiError("Vehicle not found", 404);
+      return docToVehicle(snap.id, snap.data());
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      handleFirestoreError(err, OperationType.UPDATE, docPath);
+    }
   },
 
   deleteVehicle: async (id: string): Promise<{ deletedTrips: number }> => {
-    const user = await getAuthenticatedUser();
-    if (!user) throw new ApiError("Authentication required", 401);
+    if (!isValidId(id)) throw new ApiError("Invalid vehicle ID", 400);
+    if (await isDemoMode()) {
+      return demoStore.deleteVehicle(id);
+    }
+    const uid = await requireUid();
 
-    const res = await requestBackend<{ deletedTrips: number }>(`/api/vehicles/${id}`, {
-      method: "DELETE",
-    });
-    return res;
+    const tripsPath = `users/${uid}/trips`;
+    let deletedTrips = 0;
+    try {
+      const snap = await getDocs(
+        query(collection(db, "users", uid, "trips"), where("userId", "==", uid)),
+      );
+      const matching = snap.docs.filter((d) => d.data()["vehicleId"] === id);
+      for (let i = 0; i < matching.length; i += 400) {
+        const batch = writeBatch(db);
+        const chunk = matching.slice(i, i + 400);
+        for (const tripDoc of chunk) {
+          batch.delete(tripDoc.ref);
+        }
+        await batch.commit();
+        deletedTrips += chunk.length;
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, tripsPath);
+    }
+
+    const docPath = `users/${uid}/vehicles/${id}`;
+    try {
+      await deleteDoc(doc(db, "users", uid, "vehicles", id));
+      return { deletedTrips };
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, docPath);
+    }
   },
 
   toggleVehicleStatus: async (id: string, isActive: boolean): Promise<void> => {
-    const user = await getAuthenticatedUser();
-    if (!user) throw new ApiError("Authentication required", 401);
+    if (!isValidId(id)) throw new ApiError("Invalid vehicle ID", 400);
+    if (await isDemoMode()) {
+      demoStore.toggleVehicleStatus(id, isActive);
+      return;
+    }
+    const uid = await requireUid();
 
-    await requestBackend(`/api/vehicles/${id}`, {
-      method: "PUT",
-      body: JSON.stringify({ isActive }),
-    });
+    const docPath = `users/${uid}/vehicles/${id}`;
+    try {
+      await updateDoc(doc(db, "users", uid, "vehicles", id), {
+        isActive: Boolean(isActive),
+        updatedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, docPath);
+    }
   },
 
   listTrips: async (
@@ -201,89 +366,191 @@ export const api = {
       toDate?: string;
     } = {},
   ): Promise<Trip[]> => {
-    const user = await getAuthenticatedUser();
-    if (!user) return [];
-
-    const query = new URLSearchParams();
-    if (params.vehicleId && params.vehicleId !== ALL_VEHICLES) {
-      query.set("vehicleId", params.vehicleId);
+    if (await isDemoMode()) {
+      return demoStore.listTrips(params);
     }
-    if (params.fromDate) query.set("fromDate", params.fromDate);
-    if (params.toDate) query.set("toDate", params.toDate);
+    await auth.authStateReady();
+    const uid = auth.currentUser?.uid;
+    if (!uid) return [];
 
-    const qs = query.toString();
-    const path = qs ? `/api/trips?${qs}` : "/api/trips";
-    const data = await requestBackend<Trip[]>(path);
-    if (!Array.isArray(data)) {
-      throw new ApiError("Invalid response from database", 500);
+    const colPath = `users/${uid}/trips`;
+    try {
+      const q = query(collection(db, "users", uid, "trips"), where("userId", "==", uid));
+      const snap = await getDocs(q);
+      let list = snap.docs.map((d) => docToTrip(d.id, d.data()));
+      if (params.vehicleId && params.vehicleId !== ALL_VEHICLES) {
+        list = list.filter((t) => t.vehicleId === params.vehicleId);
+      }
+      if (params.fromDate) {
+        list = list.filter((t) => t.date >= params.fromDate!);
+      }
+      if (params.toDate) {
+        list = list.filter((t) => t.date <= params.toDate!);
+      }
+      list.sort((a, b) => b.date.localeCompare(a.date));
+      return list;
+    } catch (err) {
+      handleFirestoreError(err, OperationType.LIST, colPath);
     }
-    return data;
   },
 
   createTrip: async (payload: TripPayload): Promise<Trip> => {
-    const user = await getAuthenticatedUser();
-    if (!user) throw new ApiError("Authentication required", 401);
+    const vehicleId = sanitizeString(payload.vehicleId, 128);
+    if (!isValidId(vehicleId)) {
+      throw new ApiError("Please select a valid vehicle.", 400);
+    }
 
-    const items: OtherExpenseItem[] = (payload.otherExpenseItems || [])
-      .filter((i) => i.name.trim() || Number(i.amount) > 0)
-      .map((i) => ({ name: sanitizeString(i.name), amount: Number(i.amount) || 0 }));
+    const items = normalizeExpenseItems(payload.otherExpenseItems);
+    const otherExpenses = roundCurrency(sumOtherExpenses(items));
+    const date = validDateOrToday(payload.date);
 
-    const created = await requestBackend<Trip>("/api/trips", {
-      method: "POST",
-      body: JSON.stringify({
-        vehicleId: payload.vehicleId,
-        date: payload.date,
-        income: Number(payload.income) || 0,
-        diesel: Number(payload.diesel) || 0,
-        driverPayment: Number(payload.driverPayment) || 0,
-        emiShare: Number(payload.emiShare) || 0,
+    if (await isDemoMode()) {
+      return demoStore.createTrip(
+        {
+          ...payload,
+          vehicleId,
+          date,
+          income: toAmount(payload.income),
+          diesel: toAmount(payload.diesel),
+          driverPayment: toAmount(payload.driverPayment),
+          emiShare: toAmount(payload.emiShare),
+          notes: sanitizeString(payload.notes ?? "", 2000),
+          route: sanitizeString(payload.route ?? "", 120),
+          driverName: sanitizeString(payload.driverName ?? "", 80),
+          totalKm: toAmount(payload.totalKm, 10_000_000),
+          dieselLiters: toAmount(payload.dieselLiters, 1_000_000),
+        },
+        items,
+      );
+    }
+
+    const uid = await requireUid();
+    const id = newDocId("trp");
+    const docPath = `users/${uid}/trips/${id}`;
+
+    const record = {
+      userId: uid,
+      vehicleId,
+      date,
+      income: toAmount(payload.income),
+      diesel: toAmount(payload.diesel),
+      driverPayment: toAmount(payload.driverPayment),
+      emiShare: toAmount(payload.emiShare),
+      otherExpenseItems: items,
+      otherExpenses,
+      notes: sanitizeString(payload.notes ?? "", 2000),
+      route: sanitizeString(payload.route ?? "", 120),
+      driverName: sanitizeString(payload.driverName ?? "", 80),
+      totalKm: toAmount(payload.totalKm, 10_000_000),
+      dieselLiters: toAmount(payload.dieselLiters, 1_000_000),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    try {
+      await setDoc(doc(db, "users", uid, "trips", id), record);
+      const nowIso = new Date().toISOString();
+      return {
+        _id: id,
+        vehicleId: record.vehicleId,
+        date: record.date,
+        income: record.income,
+        diesel: record.diesel,
+        driverPayment: record.driverPayment,
+        emiShare: record.emiShare,
         otherExpenseItems: items,
-        otherExpenses: sumOtherExpenses(items),
-        notes: sanitizeString(payload.notes ?? ""),
-        route: sanitizeString(payload.route ?? ""),
-        driverName: sanitizeString(payload.driverName ?? ""),
-        totalKm: Number(payload.totalKm) || 0,
-        dieselLiters: Number(payload.dieselLiters) || 0,
-      }),
-    });
-    return created;
+        otherExpenses: record.otherExpenses,
+        notes: record.notes,
+        route: record.route,
+        driverName: record.driverName,
+        totalKm: record.totalKm,
+        dieselLiters: record.dieselLiters,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, docPath);
+    }
   },
 
   updateTrip: async (id: string, payload: TripPayload): Promise<Trip> => {
-    const user = await getAuthenticatedUser();
-    if (!user) throw new ApiError("Authentication required", 401);
+    if (!isValidId(id)) throw new ApiError("Invalid trip ID", 400);
+    const vehicleId = sanitizeString(payload.vehicleId, 128);
+    if (!isValidId(vehicleId)) {
+      throw new ApiError("Please select a valid vehicle.", 400);
+    }
 
-    const items: OtherExpenseItem[] = (payload.otherExpenseItems || [])
-      .filter((i) => i.name.trim() || Number(i.amount) > 0)
-      .map((i) => ({ name: sanitizeString(i.name), amount: Number(i.amount) || 0 }));
+    const items = normalizeExpenseItems(payload.otherExpenseItems);
+    const otherExpenses = roundCurrency(sumOtherExpenses(items));
+    const date = validDateOrToday(payload.date);
 
-    const updated = await requestBackend<Trip>(`/api/trips/${id}`, {
-      method: "PUT",
-      body: JSON.stringify({
-        vehicleId: payload.vehicleId,
-        date: payload.date,
-        income: Number(payload.income) || 0,
-        diesel: Number(payload.diesel) || 0,
-        driverPayment: Number(payload.driverPayment) || 0,
-        emiShare: Number(payload.emiShare) || 0,
-        otherExpenseItems: items,
-        otherExpenses: sumOtherExpenses(items),
-        notes: sanitizeString(payload.notes ?? ""),
-        route: sanitizeString(payload.route ?? ""),
-        driverName: sanitizeString(payload.driverName ?? ""),
-        totalKm: Number(payload.totalKm) || 0,
-        dieselLiters: Number(payload.dieselLiters) || 0,
-      }),
-    });
-    return updated;
+    if (await isDemoMode()) {
+      return demoStore.updateTrip(
+        id,
+        {
+          ...payload,
+          vehicleId,
+          date,
+          income: toAmount(payload.income),
+          diesel: toAmount(payload.diesel),
+          driverPayment: toAmount(payload.driverPayment),
+          emiShare: toAmount(payload.emiShare),
+          notes: sanitizeString(payload.notes ?? "", 2000),
+          route: sanitizeString(payload.route ?? "", 120),
+          driverName: sanitizeString(payload.driverName ?? "", 80),
+          totalKm: toAmount(payload.totalKm, 10_000_000),
+          dieselLiters: toAmount(payload.dieselLiters, 1_000_000),
+        },
+        items,
+      );
+    }
+
+    const uid = await requireUid();
+    const docPath = `users/${uid}/trips/${id}`;
+    const ref = doc(db, "users", uid, "trips", id);
+
+    const patch = {
+      vehicleId,
+      date: validDateOrToday(payload.date),
+      income: toAmount(payload.income),
+      diesel: toAmount(payload.diesel),
+      driverPayment: toAmount(payload.driverPayment),
+      emiShare: toAmount(payload.emiShare),
+      otherExpenseItems: items,
+      otherExpenses,
+      notes: sanitizeString(payload.notes ?? "", 2000),
+      route: sanitizeString(payload.route ?? "", 120),
+      driverName: sanitizeString(payload.driverName ?? "", 80),
+      totalKm: toAmount(payload.totalKm, 10_000_000),
+      dieselLiters: toAmount(payload.dieselLiters, 1_000_000),
+      updatedAt: serverTimestamp(),
+    };
+
+    try {
+      await updateDoc(ref, patch);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) throw new ApiError("Trip not found", 404);
+      return docToTrip(snap.id, snap.data());
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      handleFirestoreError(err, OperationType.UPDATE, docPath);
+    }
   },
 
   deleteTrip: async (id: string): Promise<{ _id: string }> => {
-    const user = await getAuthenticatedUser();
-    if (!user) throw new ApiError("Authentication required", 401);
+    if (!isValidId(id)) throw new ApiError("Invalid trip ID", 400);
+    if (await isDemoMode()) {
+      return demoStore.deleteTrip(id);
+    }
+    const uid = await requireUid();
 
-    await requestBackend(`/api/trips/${id}`, { method: "DELETE" });
-    return { _id: id };
+    const docPath = `users/${uid}/trips/${id}`;
+    try {
+      await deleteDoc(doc(db, "users", uid, "trips", id));
+      return { _id: id };
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, docPath);
+    }
   },
 
   report: async (params: {
@@ -346,14 +613,38 @@ export const api = {
   },
 
   getSettings: async (): Promise<AppSettings> => {
-    const user = await getAuthenticatedUser();
-    if (!user) throw new ApiError("Authentication required", 401);
-
-    const data = await requestBackend<AppSettings>("/api/settings");
-    if (!data || typeof data !== "object") {
-      throw new ApiError("Invalid settings response from database", 500);
+    if (await isDemoMode()) {
+      return demoStore.getSettings();
     }
-    return data;
+    const uid = await requireUid();
+    const docPath = `users/${uid}/settings/app`;
+    const ref = doc(db, "users", uid, "settings", "app");
+
+    try {
+      const snap = await getDoc(ref);
+      if (snap.exists()) {
+        return docToSettings(uid, snap.data());
+      }
+      const initial = {
+        userId: uid,
+        appName: "",
+        transportationName: "",
+        businessName: "",
+        currency: "INR",
+        defaultVehicleId: null,
+        fullName: "",
+        mobileNumber: "",
+        address: "",
+        contactNumber: "",
+        businessEmail: "",
+        userRole: "Super Admin",
+        updatedAt: serverTimestamp(),
+      };
+      await setDoc(ref, initial);
+      return docToSettings(uid, { ...initial, updatedAt: new Date().toISOString() });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.GET, docPath);
+    }
   },
 
   updateSettings: async (payload: {
@@ -369,32 +660,310 @@ export const api = {
     businessEmail: string;
     userRole?: string;
   }): Promise<AppSettings> => {
-    const user = await getAuthenticatedUser();
-    if (!user) throw new ApiError("Authentication required", 401);
-
-    // No hardcoded business default: an empty name is resolved server-side
-    // against THIS account's own saved value (then a generic app label), so a
-    // new account can never inherit another account's transport name.
     const unifiedName = sanitizeString(
       payload.transportationName || payload.businessName || payload.appName,
+      120,
     );
+    const safeDefaultVehicleId =
+      payload.defaultVehicleId && isValidId(payload.defaultVehicleId)
+        ? payload.defaultVehicleId
+        : null;
 
-    const updated = await requestBackend<AppSettings>("/api/settings", {
-      method: "PUT",
-      body: JSON.stringify({
+    if (await isDemoMode()) {
+      return demoStore.updateSettings({
         appName: unifiedName,
         transportationName: unifiedName,
         businessName: unifiedName,
-        currency: payload.currency || "INR",
-        defaultVehicleId: payload.defaultVehicleId,
-        fullName: sanitizeString(payload.fullName),
-        userRole: sanitizeString(payload.userRole || ""),
-        mobileNumber: sanitizeNumber(payload.mobileNumber),
-        address: sanitizeString(payload.address),
-        contactNumber: sanitizeNumber(payload.contactNumber),
+        currency: sanitizeString(payload.currency || "INR", 10) || "INR",
+        defaultVehicleId: safeDefaultVehicleId,
+        fullName: sanitizeString(payload.fullName, 80),
+        mobileNumber: sanitizeNumber(payload.mobileNumber, 20),
+        address: sanitizeString(payload.address, 500),
+        contactNumber: sanitizeNumber(payload.contactNumber, 20),
         businessEmail: sanitizeEmail(payload.businessEmail),
-      }),
-    });
-    return updated;
+        userRole: sanitizeString(payload.userRole || "Demo Operator", 50) || "Demo Operator",
+      });
+    }
+
+    const uid = await requireUid();
+    const docPath = `users/${uid}/settings/app`;
+    const ref = doc(db, "users", uid, "settings", "app");
+
+    const data = {
+      userId: uid,
+      appName: unifiedName,
+      transportationName: unifiedName,
+      businessName: unifiedName,
+      currency: sanitizeString(payload.currency || "INR", 10) || "INR",
+      defaultVehicleId: safeDefaultVehicleId,
+      fullName: sanitizeString(payload.fullName, 80),
+      mobileNumber: sanitizeNumber(payload.mobileNumber, 20),
+      address: sanitizeString(payload.address, 500),
+      contactNumber: sanitizeNumber(payload.contactNumber, 20),
+      businessEmail: sanitizeEmail(payload.businessEmail),
+      userRole: sanitizeString(payload.userRole || "Super Admin", 50) || "Super Admin",
+      updatedAt: serverTimestamp(),
+    };
+
+    try {
+      const snap = await getDoc(ref);
+      if (!snap.exists()) {
+        await setDoc(ref, data);
+      } else {
+        const { userId: _omitUid, ...patch } = data;
+        void _omitUid;
+        await updateDoc(ref, patch);
+      }
+      return docToSettings(uid, { ...data, updatedAt: new Date().toISOString() });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, docPath);
+    }
+  },
+
+  syncLegacy: async (payload: {
+    vehicles?: Array<Record<string, unknown>>;
+    trips?: Array<Record<string, unknown>>;
+    settings?: Record<string, unknown>;
+  }): Promise<{ importedVehicles: number; importedTrips: number }> => {
+    const demoActive = await isDemoMode();
+    const uid = demoActive ? "demo" : await requireUid();
+
+    const [existingVehicles, existingTrips] = await Promise.all([
+      api.listVehicles(),
+      api.listTrips(),
+    ]);
+    const vehicleIdMap = new Map<string, string>();
+    const ownedVehicleIds = new Set(existingVehicles.map((v) => v._id));
+
+    let importedVehicles = 0;
+    const vehiclesToCreate: Array<{ id: string; docData: Record<string, unknown> }> = [];
+
+    if (Array.isArray(payload.vehicles)) {
+      for (const raw of payload.vehicles.slice(0, 5000)) {
+        if (!raw || typeof raw !== "object") continue;
+        const rawId = sanitizeString(String(raw["_id"] ?? raw["id"] ?? ""), 128);
+        const rawNumber = sanitizeString(
+          String(raw["vehicleNumber"] ?? raw["vehicle_number"] ?? ""),
+          64,
+        );
+        const rawName = sanitizeString(String(raw["name"] ?? ""), 255);
+
+        const match = existingVehicles.find(
+          (ev) =>
+            (rawId && ev._id === rawId) ||
+            (ev.vehicleNumber &&
+              rawNumber &&
+              ev.vehicleNumber.toLowerCase() === rawNumber.toLowerCase()),
+        );
+        if (match) {
+          if (rawId) vehicleIdMap.set(rawId, match._id);
+          continue;
+        }
+
+        const nextId =
+          rawId && isValidId(rawId) && !ownedVehicleIds.has(rawId) ? rawId : newDocId("veh");
+        if (rawId) vehicleIdMap.set(rawId, nextId);
+        ownedVehicleIds.add(nextId);
+
+        vehiclesToCreate.push({
+          id: nextId,
+          docData: {
+            userId: uid,
+            name: rawName,
+            type: sanitizeString(String(raw["type"] ?? "Truck"), 80) || "Truck",
+            model: sanitizeString(String(raw["model"] ?? ""), 255),
+            vehicleNumber: rawNumber,
+            notes: sanitizeString(String(raw["notes"] ?? ""), 2000),
+            isActive: raw["isActive"] !== false && raw["is_active"] !== false,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          },
+        });
+        importedVehicles++;
+      }
+    }
+
+    // Commit all vehicles first so Firestore Master Gate exists() passes for trips
+    if (demoActive) {
+      for (const item of vehiclesToCreate) {
+        demoStore.createVehicle({
+          name: String(item.docData["name"] ?? ""),
+          type: String(item.docData["type"] ?? "Truck"),
+          model: String(item.docData["model"] ?? ""),
+          vehicleNumber: String(item.docData["vehicleNumber"] ?? ""),
+          notes: String(item.docData["notes"] ?? ""),
+          isActive: item.docData["isActive"] !== false,
+        });
+      }
+    } else {
+      try {
+        for (let i = 0; i < vehiclesToCreate.length; i += 400) {
+          const batch = writeBatch(db);
+          for (const item of vehiclesToCreate.slice(i, i + 400)) {
+            batch.set(doc(db, "users", uid, "vehicles", item.id), item.docData);
+          }
+          await batch.commit();
+        }
+      } catch (err) {
+        handleFirestoreError(err, OperationType.WRITE, `users/${uid}/vehicles`);
+      }
+    }
+
+    let importedTrips = 0;
+    const tripsToCreate: Array<{ id: string; docData: Record<string, unknown> }> = [];
+    const knownTripIds = new Set(existingTrips.map((t) => t._id));
+
+    if (Array.isArray(payload.trips)) {
+      for (const raw of payload.trips.slice(0, 20000)) {
+        if (!raw || typeof raw !== "object") continue;
+        const rawTripId = sanitizeString(String(raw["_id"] ?? raw["id"] ?? ""), 128);
+        const rawVehicleId = sanitizeString(
+          String(raw["vehicleId"] ?? raw["vehicle_id"] ?? ""),
+          128,
+        );
+        const resolvedVehicleId = vehicleIdMap.get(rawVehicleId) ?? rawVehicleId;
+        if (
+          !resolvedVehicleId ||
+          !isValidId(resolvedVehicleId) ||
+          !ownedVehicleIds.has(resolvedVehicleId)
+        ) {
+          continue;
+        }
+
+        const date = validDateOrToday(raw["date"]);
+        const income = toAmount(raw["income"]);
+
+        const match = existingTrips.find(
+          (et) =>
+            (rawTripId && et._id === rawTripId) ||
+            (et.vehicleId === resolvedVehicleId && et.date === date && et.income === income),
+        );
+        if (match) continue;
+
+        const nextTripId =
+          rawTripId && isValidId(rawTripId) && !knownTripIds.has(rawTripId)
+            ? rawTripId
+            : newDocId("trp");
+        knownTripIds.add(nextTripId);
+
+        const rawItems = raw["otherExpenseItems"] ?? raw["other_expense_items"];
+        const items: OtherExpenseItem[] = Array.isArray(rawItems)
+          ? rawItems.slice(0, 100).map((it) => ({
+              name: sanitizeString(String((it as { name?: unknown })?.name ?? ""), 255),
+              amount: toAmount((it as { amount?: unknown })?.amount),
+            }))
+          : [];
+
+        tripsToCreate.push({
+          id: nextTripId,
+          docData: {
+            userId: uid,
+            vehicleId: resolvedVehicleId,
+            date,
+            income,
+            diesel: toAmount(raw["diesel"]),
+            driverPayment: toAmount(raw["driverPayment"] ?? raw["driver_payment"]),
+            emiShare: toAmount(raw["emiShare"] ?? raw["emi_share"]),
+            otherExpenseItems: items,
+            otherExpenses: roundCurrency(sumOtherExpenses(items)),
+            notes: sanitizeString(String(raw["notes"] ?? ""), 2000),
+            route: sanitizeString(String(raw["route"] ?? ""), 120),
+            driverName: sanitizeString(String(raw["driverName"] ?? raw["driver_name"] ?? ""), 80),
+            totalKm: toAmount(raw["totalKm"] ?? raw["total_km"], 10_000_000),
+            dieselLiters: toAmount(raw["dieselLiters"] ?? raw["diesel_liters"], 1_000_000),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          },
+        });
+        importedTrips++;
+      }
+    }
+
+    if (demoActive) {
+      for (const item of tripsToCreate) {
+        const d = item.docData;
+        demoStore.createTrip(
+          {
+            vehicleId: String(d["vehicleId"] ?? ""),
+            date: String(d["date"] ?? todayInput()),
+            income: Number(d["income"]) || 0,
+            diesel: Number(d["diesel"]) || 0,
+            driverPayment: Number(d["driverPayment"]) || 0,
+            emiShare: Number(d["emiShare"]) || 0,
+            otherExpenseItems: Array.isArray(d["otherExpenseItems"])
+              ? (d["otherExpenseItems"] as OtherExpenseItem[])
+              : [],
+            notes: String(d["notes"] ?? ""),
+            route: String(d["route"] ?? ""),
+            driverName: String(d["driverName"] ?? ""),
+            totalKm: Number(d["totalKm"]) || 0,
+            dieselLiters: Number(d["dieselLiters"]) || 0,
+          },
+          Array.isArray(d["otherExpenseItems"])
+            ? (d["otherExpenseItems"] as OtherExpenseItem[])
+            : [],
+        );
+      }
+    } else {
+      try {
+        for (let i = 0; i < tripsToCreate.length; i += 400) {
+          const batch = writeBatch(db);
+          for (const item of tripsToCreate.slice(i, i + 400)) {
+            batch.set(doc(db, "users", uid, "trips", item.id), item.docData);
+          }
+          await batch.commit();
+        }
+      } catch (err) {
+        handleFirestoreError(err, OperationType.WRITE, `users/${uid}/trips`);
+      }
+    }
+
+    if (payload.settings && typeof payload.settings === "object") {
+      const s = payload.settings;
+      const cur = await api.getSettings();
+      const rawDefault = sanitizeString(
+        String(s["defaultVehicleId"] ?? s["default_vehicle_id"] ?? ""),
+        128,
+      );
+      const mappedDefault = rawDefault ? (vehicleIdMap.get(rawDefault) ?? rawDefault) : null;
+      await api.updateSettings({
+        appName: String(
+          s["transportationName"] ??
+            s["transportation_name"] ??
+            s["businessName"] ??
+            s["business_name"] ??
+            s["appName"] ??
+            s["app_name"] ??
+            cur.appName,
+        ),
+        transportationName: String(
+          s["transportationName"] ??
+            s["transportation_name"] ??
+            s["businessName"] ??
+            s["business_name"] ??
+            cur.transportationName,
+        ),
+        businessName: String(
+          s["businessName"] ??
+            s["business_name"] ??
+            s["transportationName"] ??
+            s["transportation_name"] ??
+            cur.businessName,
+        ),
+        currency: String(s["currency"] ?? cur.currency ?? "INR"),
+        defaultVehicleId:
+          mappedDefault && ownedVehicleIds.has(mappedDefault)
+            ? mappedDefault
+            : cur.defaultVehicleId,
+        fullName: String(s["fullName"] ?? s["full_name"] ?? cur.fullName ?? ""),
+        mobileNumber: String(s["mobileNumber"] ?? s["mobile_number"] ?? cur.mobileNumber ?? ""),
+        address: String(s["address"] ?? cur.address ?? ""),
+        contactNumber: String(s["contactNumber"] ?? s["contact_number"] ?? cur.contactNumber ?? ""),
+        businessEmail: String(s["businessEmail"] ?? s["business_email"] ?? cur.businessEmail ?? ""),
+        userRole: String(s["userRole"] ?? s["user_role"] ?? cur.userRole ?? "Super Admin"),
+      });
+    }
+
+    return { importedVehicles, importedTrips };
   },
 };

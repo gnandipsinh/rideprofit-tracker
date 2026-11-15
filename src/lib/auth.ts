@@ -66,6 +66,9 @@ export function safeAuthMessage(raw: string | undefined, fallback = GENERIC_ERRO
   if (m.includes("already registered") || m.includes("already been registered")) {
     return "This email cannot be used to register. Try signing in instead.";
   }
+  if (m.includes("not configured") && raw) {
+    return raw;
+  }
   return fallback;
 }
 

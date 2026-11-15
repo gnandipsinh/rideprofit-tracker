@@ -1,7 +1,17 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { Eye, EyeOff, Loader2, LogOut, Save, Settings } from "lucide-react";
+import {
+  Download,
+  Eye,
+  EyeOff,
+  HardDriveDownload,
+  Loader2,
+  LogOut,
+  Save,
+  Settings,
+  Upload,
+} from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
@@ -50,7 +60,7 @@ export const Route = createFileRoute("/_authenticated/settings")({
 });
 
 function SettingsPage() {
-  const { settings, activeVehicles } = useApp();
+  const { settings, activeVehicles, isDemo } = useApp();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const save = useSaveSettings();
@@ -71,6 +81,8 @@ function SettingsPage() {
   const [showPasswords, setShowPasswords] = useState(false);
   const [passwordBusy, setPasswordBusy] = useState(false);
   const [hydratedFor, setHydratedFor] = useState("");
+  const [backupBusy, setBackupBusy] = useState(false);
+  const restoreInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     // Hydrate per settings record (_id is `set_<userId>`): if the cached record
@@ -136,6 +148,10 @@ function SettingsPage() {
   };
 
   const changePassword = async () => {
+    if (isDemo) {
+      toast.info("Password changes are disabled in Demo Mode. Sign in with your own account.");
+      return;
+    }
     if (!currentPassword || newPassword.length < 8 || newPassword !== confirmNewPassword) {
       toast.error("Enter a valid new password and confirm it");
       return;
@@ -187,6 +203,171 @@ function SettingsPage() {
       navigate({ to: "/landing", replace: true });
     } catch {
       navigate({ to: "/landing", replace: true });
+    }
+  };
+
+  const exportBackup = async () => {
+    setBackupBusy(true);
+    try {
+      const [vehicles, trips, currentSettings] = await Promise.all([
+        api.listVehicles(),
+        api.listTrips(),
+        api.getSettings(),
+      ]);
+      const payload = {
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        accountEmail: email,
+        vehicles,
+        trips,
+        settings: currentSettings,
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `rideprofit-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success(`Backup exported (${vehicles.length} vehicles, ${trips.length} trips)`);
+    } catch {
+      toast.error("Could not export backup");
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const runSyncPayload = async (
+    payload: {
+      vehicles?: Array<Record<string, unknown>>;
+      trips?: Array<Record<string, unknown>>;
+      settings?: Record<string, unknown>;
+    },
+    emptyMessage: string,
+  ) => {
+    const res = await api.syncLegacy(payload);
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["vehicles"] }),
+      queryClient.invalidateQueries({ queryKey: ["trips"] }),
+      queryClient.invalidateQueries({ queryKey: ["report"] }),
+      queryClient.invalidateQueries({ queryKey: ["settings"] }),
+    ]);
+    if (res.importedVehicles === 0 && res.importedTrips === 0) {
+      toast.info(emptyMessage);
+    } else {
+      setHydratedFor("");
+      toast.success(`Restored ${res.importedVehicles} vehicle(s) and ${res.importedTrips} trip(s)`);
+    }
+  };
+
+  const handleRestoreFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+
+    setBackupBusy(true);
+    try {
+      const raw = await file.text();
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+
+      let vehicles = Array.isArray(parsed["vehicles"])
+        ? (parsed["vehicles"] as Array<Record<string, unknown>>)
+        : [];
+      let trips = Array.isArray(parsed["trips"])
+        ? (parsed["trips"] as Array<Record<string, unknown>>)
+        : [];
+      let nextSettings =
+        parsed["settings"] &&
+        !Array.isArray(parsed["settings"]) &&
+        typeof parsed["settings"] === "object"
+          ? (parsed["settings"] as Record<string, unknown>)
+          : undefined;
+
+      // Support full db.json export shape (users + multi-account settings array)
+      if (Array.isArray(parsed["users"]) && email) {
+        const users = parsed["users"] as Array<Record<string, unknown>>;
+        const matchedUser = users.find(
+          (u) =>
+            String(u["email"] ?? "")
+              .trim()
+              .toLowerCase() === email.trim().toLowerCase(),
+        );
+        if (matchedUser?.["id"]) {
+          const legacyId = String(matchedUser["id"]);
+          vehicles = vehicles.filter((v) => String(v["userId"] ?? v["user_id"] ?? "") === legacyId);
+          trips = trips.filter((t) => String(t["userId"] ?? t["user_id"] ?? "") === legacyId);
+          if (Array.isArray(parsed["settings"])) {
+            const matchedSet = (parsed["settings"] as Array<Record<string, unknown>>).find(
+              (s) => String(s["userId"] ?? s["user_id"] ?? "") === legacyId,
+            );
+            if (matchedSet) nextSettings = matchedSet;
+          }
+        }
+      } else if (Array.isArray(parsed["settings"]) && parsed["settings"].length > 0) {
+        const first = parsed["settings"][0];
+        if (first && typeof first === "object") {
+          nextSettings = first as Record<string, unknown>;
+        }
+      }
+
+      if (vehicles.length === 0 && trips.length === 0 && !nextSettings) {
+        toast.info("No matching account records found in that backup file.");
+        return;
+      }
+
+      await runSyncPayload(
+        {
+          vehicles,
+          trips,
+          ...(nextSettings ? { settings: nextSettings } : {}),
+        },
+        "All records from this backup are already present in your account.",
+      );
+    } catch {
+      toast.error("Invalid backup file. Please choose a valid JSON backup.");
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const scanBrowserStorage = async () => {
+    if (typeof window === "undefined") return;
+    setBackupBusy(true);
+    try {
+      const tryReadArray = (keys: string[]): Array<Record<string, unknown>> => {
+        for (const key of keys) {
+          try {
+            const raw = window.localStorage.getItem(key);
+            if (!raw) continue;
+            const parsed: unknown = JSON.parse(raw);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              return parsed as Array<Record<string, unknown>>;
+            }
+          } catch {
+            /* ignore malformed key */
+          }
+        }
+        return [];
+      };
+
+      const vehicles = tryReadArray(["vcs.vehicles", "rideprofit.vehicles", "vehicles"]);
+      const trips = tryReadArray(["vcs.trips", "rideprofit.trips", "trips"]);
+
+      if (vehicles.length === 0 && trips.length === 0) {
+        toast.info("No older un-synced records found in this browser.");
+        return;
+      }
+
+      await runSyncPayload(
+        { vehicles, trips },
+        "Browser records were already synced to your account.",
+      );
+    } catch {
+      toast.error("Could not scan browser storage.");
+    } finally {
+      setBackupBusy(false);
     }
   };
 
@@ -474,6 +655,62 @@ function SettingsPage() {
                   <LogOut className="mr-2 h-4 w-4" /> Log Out
                 </Button>
               </div>
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-[#1C2B44] bg-[#10192A] p-5 lg:order-4 lg:col-span-2">
+            <h3 className="mb-1.5 flex items-center gap-2 text-sm font-bold text-white">
+              <span className="grid h-6 w-6 place-items-center rounded-lg bg-cyan-500/15 text-cyan-400 text-xs font-black">
+                4
+              </span>
+              Data Backup & Recovery
+            </h3>
+            <p className="mb-4 text-xs text-slate-400">
+              Download a JSON backup of your vehicles, trips, and profile, restore from a previous
+              backup file, or check this browser for older un-synced local records.
+            </p>
+            <input
+              ref={restoreInputRef}
+              type="file"
+              accept=".json,application/json"
+              onChange={handleRestoreFile}
+              className="hidden"
+            />
+            <div className="flex flex-wrap gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={backupBusy}
+                onClick={exportBackup}
+                className="h-11 rounded-xl border-[#1C2B44] bg-[#080D18] text-cyan-300 hover:bg-cyan-500/10 hover:text-cyan-200"
+              >
+                {backupBusy ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="mr-2 h-4 w-4" />
+                )}
+                Export Backup (.json)
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={backupBusy}
+                onClick={() => restoreInputRef.current?.click()}
+                className="h-11 rounded-xl border-[#1C2B44] bg-[#080D18] text-white hover:bg-[#172844]"
+              >
+                <Upload className="mr-2 h-4 w-4" />
+                Restore from Backup
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={backupBusy}
+                onClick={scanBrowserStorage}
+                className="h-11 rounded-xl border-[#1C2B44] bg-[#080D18] text-slate-300 hover:bg-[#172844] hover:text-white"
+              >
+                <HardDriveDownload className="mr-2 h-4 w-4" />
+                Check Browser Storage
+              </Button>
             </div>
           </section>
         </div>

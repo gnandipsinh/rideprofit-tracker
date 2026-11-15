@@ -57,7 +57,7 @@ export function AppShell({
   children: ReactNode;
   showAddTrip?: boolean;
 }) {
-  const { appName, userName, settings } = useApp();
+  const { appName, userName, isDemo, settings } = useApp();
   const health = useHealth();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const searchStr = useRouterState({ select: (s) => s.location.searchStr });
@@ -226,14 +226,14 @@ export function AppShell({
               title="Profile & Settings"
             >
               <div className="grid h-8 w-8 place-items-center rounded-lg bg-cyan-500/15 text-cyan-400 font-bold text-xs ring-1 ring-cyan-500/20 group-hover:ring-cyan-500/40 transition-all">
-                {userName ? userName.charAt(0).toUpperCase() : "G"}
+                {(userName || "Fleet Operator").charAt(0).toUpperCase()}
               </div>
               <div className="text-left">
-                <p className="text-xs font-bold text-white leading-tight truncate max-w-[120px] group-hover:text-cyan-300 transition-colors">
-                  {userName || "Gohil Gnandipsinh"}
+                <p className="text-xs font-bold text-white leading-tight truncate max-w-[140px] group-hover:text-cyan-300 transition-colors">
+                  {userName || (isDemo ? "Demo Operator" : "Fleet Operator")}
                 </p>
                 <p className="text-[0.65rem] text-cyan-400/90 font-semibold tracking-wide">
-                  {settings?.userRole || "Super Admin"}
+                  {isDemo ? "Demo Mode" : settings?.userRole || "Super Admin"}
                 </p>
               </div>
             </Link>
@@ -358,14 +358,14 @@ export function AppShell({
               className="flex items-center gap-3 p-3 my-3 rounded-xl border border-[#1C2B44] bg-[#10192A] hover:border-cyan-500/40 transition-colors"
             >
               <div className="grid h-9 w-9 place-items-center rounded-lg bg-cyan-500/20 text-cyan-400 font-bold text-sm">
-                {userName ? userName.charAt(0).toUpperCase() : "G"}
+                {(userName || "Fleet Operator").charAt(0).toUpperCase()}
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-bold text-white truncate">
-                  {userName || "Gohil Gnandipsinh"}
+                  {userName || (isDemo ? "Demo Operator" : "Fleet Operator")}
                 </p>
                 <p className="text-[0.68rem] text-cyan-400 font-semibold">
-                  {settings?.userRole || "Super Admin"}
+                  {isDemo ? "Demo Mode" : settings?.userRole || "Super Admin"}
                 </p>
               </div>
             </Link>

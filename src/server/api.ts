@@ -12,6 +12,8 @@ import {
   type VehicleRecord,
 } from "./db";
 import { ensureStoreReady, getStore } from "./store";
+import { JsonStore } from "./store/json";
+import { PgStore } from "./store/pg";
 
 /**
  * Returns the store after guaranteeing the schema exists. Every direct store
@@ -194,6 +196,24 @@ function getTokenSecret(): string {
         return cachedSecret;
       }
 
+      const stableSeed = [
+        process.env["AUTHORIZED_SERVICE_ACCOUNT_EMAIL"],
+        process.env["K_SERVICE"],
+        process.env["K_CONFIGURATION"],
+        process.env["APPLET_ID"],
+        process.env["APP_URL"],
+      ]
+        .filter((v): v is string => typeof v === "string" && v.trim().length > 0)
+        .join("|");
+
+      if (stableSeed.length >= 16) {
+        cachedSecret = crypto
+          .createHmac("sha256", "rideprofit-cloud-run-signing-salt-v1")
+          .update(stableSeed)
+          .digest("hex");
+        return cachedSecret;
+      }
+
       console.warn(
         `[config] TOKEN_SECRET and DATABASE_URL are not set in production; using persisted/in-memory secret fallback.`,
       );
@@ -236,19 +256,38 @@ function base64UrlDecode(str: string): string {
   return Buffer.from(str, "base64url").toString("utf8");
 }
 
-function signJwt(userId: string, purpose: TokenPurpose, ttlSeconds: number): string {
-  const now = Math.floor(Date.now() / 1000);
+interface VerifiedTokenResult {
+  userId: string;
+  valid: boolean;
+  iatMs?: number;
+  exp?: number;
+  claims?: {
+    email?: string;
+    fullName?: string;
+    mobile?: string;
+  };
+}
+
+function signJwt(subject: string | UserRecord, purpose: TokenPurpose, ttlSeconds: number): string {
+  const nowMs = Date.now();
+  const now = Math.floor(nowMs / 1000);
   const expiresAt = now + ttlSeconds;
+  const userId = typeof subject === "string" ? subject : subject.id;
   const header = base64UrlEncode(JSON.stringify({ alg: "HS256", typ: "JWT" }));
-  const payload = base64UrlEncode(
-    JSON.stringify({
-      sub: userId,
-      userId,
-      purpose,
-      iat: now,
-      exp: expiresAt,
-    }),
-  );
+  const payloadObj: Record<string, unknown> = {
+    sub: userId,
+    userId,
+    purpose,
+    iat: now,
+    iatMs: nowMs,
+    exp: expiresAt,
+  };
+  if (typeof subject !== "string" && purpose === "access") {
+    payloadObj["email"] = subject.email;
+    payloadObj["fullName"] = subject.fullName;
+    payloadObj["mobile"] = subject.mobile;
+  }
+  const payload = base64UrlEncode(JSON.stringify(payloadObj));
   const signature = crypto
     .createHmac("sha256", getTokenSecret())
     .update(`${header}.${payload}`)
@@ -256,7 +295,7 @@ function signJwt(userId: string, purpose: TokenPurpose, ttlSeconds: number): str
   return `${header}.${payload}.${signature}`;
 }
 
-function verifyJwt(jwt: string, expectedPurpose: TokenPurpose): { userId: string; valid: boolean } {
+function verifyJwt(jwt: string, expectedPurpose: TokenPurpose): VerifiedTokenResult {
   const parts = jwt.split(".");
   if (parts.length !== 3) return { userId: "", valid: false };
   const [headerB64, payloadB64, signatureB64] = parts;
@@ -286,25 +325,52 @@ function verifyJwt(jwt: string, expectedPurpose: TokenPurpose): { userId: string
       sub?: string;
       userId?: string;
       purpose?: string;
+      iat?: number;
+      iatMs?: number;
       exp?: number;
+      email?: unknown;
+      fullName?: unknown;
+      mobile?: unknown;
     };
     const now = Math.floor(Date.now() / 1000);
     if (!payload.exp || now > payload.exp) return { userId: "", valid: false };
     if (payload.purpose !== expectedPurpose) return { userId: "", valid: false };
     const uid = payload.sub || payload.userId || "";
     if (!uid) return { userId: "", valid: false };
-    return { userId: uid, valid: true };
+
+    const iatMs =
+      typeof payload.iatMs === "number"
+        ? payload.iatMs
+        : typeof payload.iat === "number"
+          ? payload.iat * 1000
+          : undefined;
+
+    return {
+      userId: uid,
+      valid: true,
+      ...(iatMs !== undefined ? { iatMs } : {}),
+      ...(typeof payload.exp === "number" ? { exp: payload.exp } : {}),
+      claims: {
+        ...(typeof payload.email === "string" ? { email: payload.email } : {}),
+        ...(typeof payload.fullName === "string" ? { fullName: payload.fullName } : {}),
+        ...(typeof payload.mobile === "string" ? { mobile: payload.mobile } : {}),
+      },
+    };
   } catch {
     return { userId: "", valid: false };
   }
 }
 
-function signToken(userId: string, purpose: TokenPurpose, ttlSeconds: number): string {
-  return signJwt(userId, purpose, ttlSeconds);
+function signToken(
+  subject: string | UserRecord,
+  purpose: TokenPurpose,
+  ttlSeconds: number,
+): string {
+  return signJwt(subject, purpose, ttlSeconds);
 }
 
-function verifyToken(token: string, purpose: TokenPurpose): { userId: string; valid: boolean } {
-  const invalid = { userId: "", valid: false };
+function verifyToken(token: string, purpose: TokenPurpose): VerifiedTokenResult {
+  const invalid: VerifiedTokenResult = { userId: "", valid: false };
   if (!token) return invalid;
 
   // 1. Standard RFC 7519 JSON Web Token (header.payload.signature)
@@ -482,14 +548,18 @@ async function sessionFor(
 ): Promise<ReturnType<typeof buildSession>> {
   const session = buildSession(user, purpose);
   if (purpose === "access") {
+    const store = await readyStore();
+    if (store instanceof PgStore) {
+      await store.importLegacyPublicSchemaForEmail(user.id, user.email).catch(() => undefined);
+    }
     const expiresAt = Math.floor(Date.now() / 1000) + ACCESS_TOKEN_TTL_SECONDS;
-    await (await readyStore()).createSession(sessionKey(session.access_token), user.id, expiresAt);
+    await store.createSession(sessionKey(session.access_token), user.id, expiresAt);
   }
   return session;
 }
 
 function buildSession(user: UserRecord, purpose: TokenPurpose) {
-  const access_token = signToken(user.id, purpose, ACCESS_TOKEN_TTL_SECONDS);
+  const access_token = signToken(user, purpose, ACCESS_TOKEN_TTL_SECONDS);
   return {
     access_token,
     token_type: "bearer",
@@ -540,15 +610,52 @@ async function getAuthUserFromToken(token: string): Promise<UserRecord | null> {
   }
 
   try {
-    const { userId, valid } = verifyToken(token, "access");
+    const { userId, valid, iatMs, exp, claims } = verifyToken(token, "access");
     if (!valid || !userId) return null;
     const store = await readyStore();
-    const active = await store.isSessionActive(hash);
-    if (!active) {
-      authUserCache.delete(hash);
-      return null;
+
+    let user: UserRecord | null = null;
+    if (store instanceof JsonStore) {
+      const revoked = await store.isSessionExplicitlyRevoked(hash, userId, iatMs);
+      if (revoked) {
+        authUserCache.delete(hash);
+        return null;
+      }
+
+      user = await store.getUser(userId);
+      if (!user && claims?.email) {
+        const recoveredUser: UserRecord = {
+          id: userId,
+          email: claims.email,
+          password: "",
+          fullName: claims.fullName || "Fleet Operator",
+          mobile: claims.mobile || "",
+          createdAt: new Date(iatMs ?? now).toISOString(),
+        };
+        await store.mutate((db) => {
+          if (!db.users.some((u) => u.id === userId)) {
+            db.users.push(recoveredUser);
+          }
+        });
+        user = recoveredUser;
+      }
+
+      if (user && !(await store.isSessionActive(hash))) {
+        await store.createSession(
+          hash,
+          userId,
+          exp ?? Math.floor(now / 1000) + ACCESS_TOKEN_TTL_SECONDS,
+        );
+      }
+    } else {
+      const active = await store.isSessionActive(hash);
+      if (!active) {
+        authUserCache.delete(hash);
+        return null;
+      }
+      user = await store.getUser(userId);
     }
-    const user = await store.getUser(userId);
+
     if (user) {
       authUserCache.set(hash, { user, expiresAt: now + 30_000 });
       if (authUserCache.size > 2000) {
@@ -1599,101 +1706,164 @@ export async function handleApiFetch(request: Request): Promise<Response> {
       }
     }
 
-    // 9. One-shot import of a client's legacy local records
+    // 9. One-shot import of a client's legacy local records or JSON backup
     if (path === "/api/sync" && method === "POST") {
       const payload = (await readJson(request)) as {
-        vehicles?: VehicleRecord[];
-        trips?: TripRecord[];
-        settings?: Partial<SettingsRecord>;
+        vehicles?: Array<Record<string, unknown>>;
+        trips?: Array<Record<string, unknown>>;
+        settings?: Record<string, unknown>;
       };
 
       const counts = await withDatabase((d) => {
         let importedVehicles = 0;
         let importedTrips = 0;
+        const vehicleIdMap = new Map<string, string>();
+        const ownedVehicleIds = new Set(
+          d.vehicles.filter((v) => v.userId === userId).map((v) => v._id),
+        );
 
         if (Array.isArray(payload.vehicles)) {
-          for (const v of payload.vehicles.slice(0, 5000)) {
+          for (const raw of payload.vehicles.slice(0, 5000)) {
+            if (!raw || typeof raw !== "object") continue;
+            const rawId = cleanString(raw["_id"] ?? raw["id"], 128);
+            const rawNumber = cleanString(raw["vehicleNumber"] ?? raw["vehicle_number"]);
+            const rawName = cleanString(raw["name"]);
             const match = d.vehicles.find(
               (ev) =>
                 ev.userId === userId &&
-                (ev._id === v._id ||
-                  (ev.vehicleNumber && v.vehicleNumber && ev.vehicleNumber === v.vehicleNumber)),
+                ((rawId && ev._id === rawId) ||
+                  (ev.vehicleNumber &&
+                    rawNumber &&
+                    ev.vehicleNumber.toLowerCase() === rawNumber.toLowerCase())),
             );
-            if (match) continue;
-            d.vehicles.push({
-              _id: v._id || `veh_${crypto.randomUUID()}`,
+            if (match) {
+              if (rawId) vehicleIdMap.set(rawId, match._id);
+              continue;
+            }
+            const idCollides = Boolean(rawId && d.vehicles.some((ev) => ev._id === rawId));
+            const nextId = rawId && !idCollides ? rawId : `veh_${crypto.randomUUID()}`;
+            if (rawId) vehicleIdMap.set(rawId, nextId);
+            const newVehicle: VehicleRecord = {
+              _id: nextId,
               userId,
-              name: cleanString(v.name),
-              type: cleanString(v.type) || "Truck",
-              model: cleanString(v.model),
-              vehicleNumber: cleanString(v.vehicleNumber),
-              notes: cleanString(v.notes, NOTES_MAX),
-              isActive: v.isActive ?? true,
-              createdAt: v.createdAt || new Date().toISOString(),
+              name: rawName,
+              type: cleanString(raw["type"]) || "Truck",
+              model: cleanString(raw["model"]),
+              vehicleNumber: rawNumber,
+              notes: cleanString(raw["notes"], NOTES_MAX),
+              isActive: raw["isActive"] !== false && raw["is_active"] !== false,
+              createdAt:
+                cleanString(raw["createdAt"] ?? raw["created_at"], 64) || new Date().toISOString(),
               updatedAt: new Date().toISOString(),
-            });
+            };
+            d.vehicles.push(newVehicle);
+            ownedVehicleIds.add(nextId);
             importedVehicles++;
           }
         }
 
         if (Array.isArray(payload.trips)) {
-          for (const t of payload.trips.slice(0, 20000)) {
+          for (const raw of payload.trips.slice(0, 20000)) {
+            if (!raw || typeof raw !== "object") continue;
+            const rawTripId = cleanString(raw["_id"] ?? raw["id"], 128);
+            const rawVehicleId = cleanString(raw["vehicleId"] ?? raw["vehicle_id"], 128);
+            const resolvedVehicleId = vehicleIdMap.get(rawVehicleId) ?? rawVehicleId;
+            if (!resolvedVehicleId || !ownedVehicleIds.has(resolvedVehicleId)) continue;
+
+            const rawDate = cleanString(raw["date"], 32).slice(0, 10);
+            const date = isValidCalendarDate(rawDate)
+              ? rawDate
+              : new Date().toISOString().slice(0, 10);
+            const income = toAmount(raw["income"]);
+
             const match = d.trips.find(
               (et) =>
                 et.userId === userId &&
-                (et._id === t._id ||
-                  (et.vehicleId === t.vehicleId && et.date === t.date && et.income === t.income)),
+                ((rawTripId && et._id === rawTripId) ||
+                  (et.vehicleId === resolvedVehicleId && et.date === date && et.income === income)),
             );
             if (match) continue;
-            const items = normalizeExpenseItems(t.otherExpenseItems);
+
+            const idCollides = Boolean(rawTripId && d.trips.some((et) => et._id === rawTripId));
+            const nextTripId = rawTripId && !idCollides ? rawTripId : `trp_${crypto.randomUUID()}`;
+            const items = normalizeExpenseItems(
+              raw["otherExpenseItems"] ?? raw["other_expense_items"],
+            );
             d.trips.push({
-              _id: t._id || `trp_${crypto.randomUUID()}`,
+              _id: nextTripId,
               userId,
-              vehicleId: cleanString(t.vehicleId),
-              date: DATE_RE.test(String(t.date || ""))
-                ? String(t.date)
-                : new Date().toISOString().slice(0, 10),
-              income: toAmount(t.income),
-              diesel: toAmount(t.diesel),
-              driverPayment: toAmount(t.driverPayment),
-              emiShare: toAmount(t.emiShare),
+              vehicleId: resolvedVehicleId,
+              date,
+              income,
+              diesel: toAmount(raw["diesel"]),
+              driverPayment: toAmount(raw["driverPayment"] ?? raw["driver_payment"]),
+              emiShare: toAmount(raw["emiShare"] ?? raw["emi_share"]),
               otherExpenseItems: items,
               otherExpenses: sumItems(items),
-              notes: cleanString(t.notes, NOTES_MAX),
-              route: cleanString(t.route, 120),
-              driverName: cleanString(t.driverName, 80),
-              totalKm: t.totalKm ? toAmount(t.totalKm) : 0,
-              dieselLiters: t.dieselLiters ? toAmount(t.dieselLiters) : 0,
-              createdAt: t.createdAt || new Date().toISOString(),
+              notes: cleanString(raw["notes"], NOTES_MAX),
+              route: cleanString(raw["route"], 120),
+              driverName: cleanString(raw["driverName"] ?? raw["driver_name"], 80),
+              totalKm: toAmount(raw["totalKm"] ?? raw["total_km"]),
+              dieselLiters: toAmount(raw["dieselLiters"] ?? raw["diesel_liters"]),
+              createdAt:
+                cleanString(raw["createdAt"] ?? raw["created_at"], 64) || new Date().toISOString(),
               updatedAt: new Date().toISOString(),
             });
             importedTrips++;
           }
         }
 
-        if (payload.settings) {
+        if (payload.settings && typeof payload.settings === "object") {
           // Allowlisted fields only — a client cannot inject arbitrary keys.
           const s = payload.settings;
           const index = d.settings.findIndex((x) => x.userId === userId);
           const current = index === -1 ? undefined : d.settings[index];
           const unifiedName = cleanString(
-            s.transportationName || s.businessName || s.appName || current?.appName,
+            s["transportationName"] ??
+              s["transportation_name"] ??
+              s["businessName"] ??
+              s["business_name"] ??
+              s["appName"] ??
+              s["app_name"] ??
+              current?.appName,
             NAME_MAX,
           );
+          const rawDefaultVeh = cleanString(s["defaultVehicleId"] ?? s["default_vehicle_id"], 128);
+          const mappedDefaultVeh = rawDefaultVeh
+            ? (vehicleIdMap.get(rawDefaultVeh) ?? rawDefaultVeh)
+            : null;
+          const safeDefaultVeh =
+            mappedDefaultVeh && ownedVehicleIds.has(mappedDefaultVeh)
+              ? mappedDefaultVeh
+              : (current?.defaultVehicleId ?? null);
+
           const next: SettingsRecord = {
             _id: current?._id || `set_${userId}`,
             userId,
             appName: unifiedName || current?.appName || "Vehicle Calculation System",
             transportationName: unifiedName || current?.transportationName || "",
             businessName: unifiedName || current?.businessName || "",
-            currency: cleanString(s.currency, 10) || current?.currency || "INR",
-            defaultVehicleId: s.defaultVehicleId ?? current?.defaultVehicleId ?? null,
-            fullName: cleanString(s.fullName ?? current?.fullName ?? "", NAME_MAX),
-            mobileNumber: cleanString(s.mobileNumber ?? current?.mobileNumber ?? "", 20),
-            address: cleanString(s.address ?? current?.address ?? "", 500),
-            contactNumber: cleanString(s.contactNumber ?? current?.contactNumber ?? "", 20),
-            businessEmail: normalizeEmail(s.businessEmail ?? current?.businessEmail ?? ""),
-            userRole: cleanString(s.userRole ?? current?.userRole ?? "", 50) || "Super Admin",
+            currency: cleanString(s["currency"], 10) || current?.currency || "INR",
+            defaultVehicleId: safeDefaultVeh,
+            fullName: cleanString(
+              s["fullName"] ?? s["full_name"] ?? current?.fullName ?? "",
+              NAME_MAX,
+            ),
+            mobileNumber: cleanString(
+              s["mobileNumber"] ?? s["mobile_number"] ?? current?.mobileNumber ?? "",
+              20,
+            ),
+            address: cleanString(s["address"] ?? current?.address ?? "", 500),
+            contactNumber: cleanString(
+              s["contactNumber"] ?? s["contact_number"] ?? current?.contactNumber ?? "",
+              20,
+            ),
+            businessEmail: normalizeEmail(
+              s["businessEmail"] ?? s["business_email"] ?? current?.businessEmail ?? "",
+            ),
+            userRole:
+              cleanString(s["userRole"] ?? s["user_role"] ?? current?.userRole ?? "", 50) ||
+              "Super Admin",
             updatedAt: new Date().toISOString(),
           };
           if (index === -1) d.settings.push(next);

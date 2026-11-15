@@ -1,0 +1,218 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net: default deny everything unless explicitly matched below
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isNonNegNumber(val, maxVal) {
+      return val is number && val >= 0 && val <= maxVal;
+    }
+
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll(['uid', 'email', 'fullName', 'mobile', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'fullName', 'mobile', 'createdAt', 'updatedAt'])
+        && data.uid is string && data.uid == userId && data.uid == request.auth.uid
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 255
+        && data.fullName is string && data.fullName.size() <= 80
+        && data.mobile is string && data.mobile.size() <= 20
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidVehicle(data, userId) {
+      return data.keys().hasAll([
+          'userId', 'name', 'type', 'model', 'vehicleNumber', 'notes', 'isActive', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'userId', 'name', 'type', 'model', 'vehicleNumber', 'notes', 'isActive', 'createdAt', 'updatedAt'
+        ])
+        && data.userId is string && data.userId == userId && data.userId == request.auth.uid
+        && data.name is string && data.name.size() <= 255
+        && data.type is string && data.type.size() >= 1 && data.type.size() <= 80
+        && data.model is string && data.model.size() <= 255
+        && data.vehicleNumber is string && data.vehicleNumber.size() <= 64
+        && data.notes is string && data.notes.size() <= 2000
+        && data.isActive is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidTrip(data, userId) {
+      return data.keys().hasAll([
+          'userId', 'vehicleId', 'date', 'income', 'diesel', 'driverPayment', 'emiShare',
+          'otherExpenseItems', 'otherExpenses', 'notes', 'route', 'driverName',
+          'totalKm', 'dieselLiters', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'userId', 'vehicleId', 'date', 'income', 'diesel', 'driverPayment', 'emiShare',
+          'otherExpenseItems', 'otherExpenses', 'notes', 'route', 'driverName',
+          'totalKm', 'dieselLiters', 'createdAt', 'updatedAt'
+        ])
+        && data.userId is string && data.userId == userId && data.userId == request.auth.uid
+        && isValidId(data.vehicleId)
+        && data.date is string && data.date.size() == 10 && data.date.matches('^\\d{4}-\\d{2}-\\d{2}$')
+        && isNonNegNumber(data.income, 1000000000)
+        && isNonNegNumber(data.diesel, 1000000000)
+        && isNonNegNumber(data.driverPayment, 1000000000)
+        && isNonNegNumber(data.emiShare, 1000000000)
+        && data.otherExpenseItems is list && data.otherExpenseItems.size() <= 100
+        && (
+          data.otherExpenseItems.size() == 0 ||
+          (
+            data.otherExpenseItems[0] is map &&
+            data.otherExpenseItems[0].keys().hasAll(['name', 'amount']) &&
+            data.otherExpenseItems[0].keys().hasOnly(['name', 'amount']) &&
+            data.otherExpenseItems[0].name is string &&
+            data.otherExpenseItems[0].name.size() <= 255 &&
+            isNonNegNumber(data.otherExpenseItems[0].amount, 1000000000)
+          )
+        )
+        && isNonNegNumber(data.otherExpenses, 1000000000)
+        && data.notes is string && data.notes.size() <= 2000
+        && data.route is string && data.route.size() <= 120
+        && data.driverName is string && data.driverName.size() <= 80
+        && isNonNegNumber(data.totalKm, 10000000)
+        && isNonNegNumber(data.dieselLiters, 1000000)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidSettings(data, userId) {
+      return data.keys().hasAll([
+          'userId', 'appName', 'transportationName', 'businessName', 'currency',
+          'defaultVehicleId', 'fullName', 'mobileNumber', 'address',
+          'contactNumber', 'businessEmail', 'userRole', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'userId', 'appName', 'transportationName', 'businessName', 'currency',
+          'defaultVehicleId', 'fullName', 'mobileNumber', 'address',
+          'contactNumber', 'businessEmail', 'userRole', 'updatedAt'
+        ])
+        && data.userId is string && data.userId == userId && data.userId == request.auth.uid
+        && data.appName is string && data.appName.size() <= 120
+        && data.transportationName is string && data.transportationName.size() <= 120
+        && data.businessName is string && data.businessName.size() <= 120
+        && data.currency is string && data.currency.size() >= 1 && data.currency.size() <= 10
+        && (data.defaultVehicleId == null || isValidId(data.defaultVehicleId))
+        && data.fullName is string && data.fullName.size() <= 80
+        && data.mobileNumber is string && data.mobileNumber.size() <= 20
+        && data.address is string && data.address.size() <= 500
+        && data.contactNumber is string && data.contactNumber.size() <= 20
+        && data.businessEmail is string && data.businessEmail.size() <= 255
+        && data.userRole is string && data.userRole.size() <= 50
+        && data.updatedAt is timestamp;
+    }
+
+    match /users/{userId} {
+      allow get: if isOwner(userId) && isValidId(userId);
+      allow list: if false;
+      allow create: if isOwner(userId)
+        && isValidId(userId)
+        && isValidUserProfile(incoming(), userId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isOwner(userId)
+        && isValidId(userId)
+        && isValidUserProfile(incoming(), userId)
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['email', 'fullName', 'mobile', 'updatedAt']);
+      allow delete: if isOwner(userId) && isValidId(userId);
+
+      match /vehicles/{vehicleId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(vehicleId);
+        allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow create: if isOwner(userId)
+          && isValidId(userId)
+          && isValidId(vehicleId)
+          && isValidVehicle(incoming(), userId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time;
+        allow update: if isOwner(userId)
+          && isValidId(userId)
+          && isValidId(vehicleId)
+          && isValidVehicle(incoming(), userId)
+          && incoming().userId == existing().userId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'name', 'type', 'model', 'vehicleNumber', 'notes', 'isActive', 'updatedAt'
+          ]);
+        allow delete: if isOwner(userId) && isValidId(userId) && isValidId(vehicleId);
+      }
+
+      match /trips/{tripId} {
+        allow get: if isOwner(userId) && isValidId(userId) && isValidId(tripId);
+        allow list: if isOwner(userId) && resource.data.userId == request.auth.uid;
+        allow create: if isOwner(userId)
+          && isValidId(userId)
+          && isValidId(tripId)
+          && isValidTrip(incoming(), userId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && exists(/databases/$(database)/documents/users/$(userId)/vehicles/$(incoming().vehicleId));
+        allow update: if isOwner(userId)
+          && isValidId(userId)
+          && isValidId(tripId)
+          && isValidTrip(incoming(), userId)
+          && incoming().userId == existing().userId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'vehicleId', 'date', 'income', 'diesel', 'driverPayment', 'emiShare',
+            'otherExpenseItems', 'otherExpenses', 'notes', 'route', 'driverName',
+            'totalKm', 'dieselLiters', 'updatedAt'
+          ])
+          && exists(/databases/$(database)/documents/users/$(userId)/vehicles/$(incoming().vehicleId));
+        allow delete: if isOwner(userId) && isValidId(userId) && isValidId(tripId);
+      }
+
+      match /settings/{settingId} {
+        allow get: if isOwner(userId) && isValidId(userId) && settingId == 'app';
+        allow list: if false;
+        allow create: if isOwner(userId)
+          && isValidId(userId)
+          && settingId == 'app'
+          && isValidSettings(incoming(), userId)
+          && incoming().updatedAt == request.time;
+        allow update: if isOwner(userId)
+          && isValidId(userId)
+          && settingId == 'app'
+          && isValidSettings(incoming(), userId)
+          && incoming().userId == existing().userId
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'appName', 'transportationName', 'businessName', 'currency', 'defaultVehicleId',
+            'fullName', 'mobileNumber', 'address', 'contactNumber', 'businessEmail',
+            'userRole', 'updatedAt'
+          ]);
+        allow delete: if false;
+      }
+    }
+  }
+}
