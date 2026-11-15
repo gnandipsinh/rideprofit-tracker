@@ -517,19 +517,18 @@ function AuthPage() {
         </div>
 
         <div className="mb-6 flex flex-col items-center text-center">
-          <div className="grid h-16 w-16 place-items-center rounded-3xl bg-cyan-500/15 text-cyan-400 shadow-[0_0_25px_rgba(6,182,212,0.4)] ring-1 ring-cyan-400/40">
+          <div className="grid h-14 w-14 place-items-center rounded-2xl bg-cyan-500/15 text-cyan-400 ring-1 ring-cyan-400/40 shadow-lg shadow-cyan-500/20">
             <Truck className="h-7 w-7" />
           </div>
-          <h1 className="mt-4 text-2xl font-extrabold tracking-tight sm:text-3xl text-white flex items-center justify-center">
+          <h1 className="mt-3 text-2xl font-black tracking-tight text-white flex items-center justify-center">
             RideProfit
-            <span className="ml-1.5 inline-block h-2 w-2 rounded-full bg-cyan-400 shadow-[0_0_8px_#22d3ee]" />
           </h1>
-          <p className="mt-1 text-[0.65rem] font-bold uppercase tracking-[0.3em] text-cyan-400/90">
+          <p className="text-[0.68rem] font-bold uppercase tracking-[0.25em] text-cyan-400">
             Tracker
           </p>
         </div>
 
-        <div className="fleet-panel rounded-3xl p-5 backdrop-blur-xl sm:p-7 border border-cyan-500/25 shadow-2xl">
+        <div className="rounded-2xl p-6 sm:p-7 border border-[#1C2B44] bg-[#10192A] shadow-2xl">
           <div className="mb-5">
             <h2 className="text-xl font-extrabold">{heading[step].title}</h2>
             <p className="mt-1 text-sm text-muted-foreground">{heading[step].sub}</p>

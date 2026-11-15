@@ -1,45 +1,115 @@
 import type { ReactNode } from "react";
+import { TrendingUp, TrendingDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-interface StatCardProps {
+export interface StatCardProps {
   label: string;
   value: string;
   icon?: ReactNode;
-  tone?: "default" | "gold" | "cyan" | "purple" | "success" | "danger";
+  tone?: "default" | "cyan" | "purple" | "success" | "danger" | "gold";
+  trend?: {
+    value: string;
+    isPositive?: boolean;
+  };
   sub?: string;
+  className?: string;
 }
 
-const toneClass: Record<string, string> = {
-  default: "text-white",
-  gold: "text-cyan-400",
-  cyan: "text-cyan-400",
-  purple: "text-purple-400",
-  success: "text-emerald-400",
-  danger: "text-rose-400",
+type Tone = NonNullable<StatCardProps["tone"]>;
+
+const defaultIconStyle = {
+  bg: "bg-slate-800/80",
+  text: "text-slate-300",
+  ring: "ring-slate-700/60",
 };
 
-export function StatCard({ label, value, icon, tone = "default", sub }: StatCardProps) {
+const toneIconStyles: Record<Tone, { bg: string; text: string; ring: string }> = {
+  default: defaultIconStyle,
+  cyan: {
+    bg: "bg-cyan-500/15",
+    text: "text-cyan-400",
+    ring: "ring-cyan-500/30",
+  },
+  gold: {
+    bg: "bg-cyan-500/15",
+    text: "text-cyan-400",
+    ring: "ring-cyan-500/30",
+  },
+  purple: {
+    bg: "bg-purple-500/15",
+    text: "text-purple-400",
+    ring: "ring-purple-500/30",
+  },
+  success: {
+    bg: "bg-emerald-500/15",
+    text: "text-emerald-400",
+    ring: "ring-emerald-500/30",
+  },
+  danger: {
+    bg: "bg-rose-500/15",
+    text: "text-rose-400",
+    ring: "ring-rose-500/30",
+  },
+};
+
+export function StatCard({
+  label,
+  value,
+  icon,
+  tone = "default",
+  trend,
+  sub,
+  className,
+}: StatCardProps) {
+  const iconStyle = toneIconStyles[tone] ?? defaultIconStyle;
+
   return (
-    <div className="glass-card tap-scale rounded-2xl p-4 sm:p-5 border border-cyan-500/15 hover:border-cyan-500/35 transition-all">
-      <div className="flex items-start justify-between gap-2">
-        <p className="min-w-0 text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-slate-400">
-          {label}
-        </p>
+    <div
+      className={cn(
+        "rounded-2xl border border-[#1C2B44] bg-[#10192A] p-4 sm:p-5 transition-all duration-200 hover:border-cyan-500/30",
+        className,
+      )}
+    >
+      <div className="flex items-center gap-3">
         {icon ? (
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-cyan-500/15 text-cyan-400 ring-1 ring-cyan-500/30 shadow-[0_0_12px_rgba(6,182,212,0.2)]">
+          <div
+            className={cn(
+              "grid h-10 w-10 shrink-0 place-items-center rounded-xl ring-1",
+              iconStyle.bg,
+              iconStyle.text,
+              iconStyle.ring,
+            )}
+          >
             {icon}
-          </span>
+          </div>
         ) : null}
+        <p className="min-w-0 text-xs font-semibold text-slate-400 truncate">{label}</p>
       </div>
-      <p
-        className={cn(
-          "mt-2 truncate text-xl font-extrabold tabular-nums sm:text-2xl md:text-3xl",
-          toneClass[tone],
-        )}
-      >
-        {value}
-      </p>
-      {sub ? <p className="mt-1 truncate text-xs text-muted-foreground">{sub}</p> : null}
+
+      <div className="mt-3 flex items-baseline justify-between gap-2">
+        <p className="truncate text-xl sm:text-2xl font-black tabular-nums tracking-tight text-white">
+          {value}
+        </p>
+      </div>
+
+      {trend ? (
+        <div className="mt-2 flex items-center gap-1.5 text-xs font-semibold">
+          {trend.isPositive ? (
+            <span className="inline-flex items-center gap-0.5 text-emerald-400">
+              <TrendingUp className="h-3 w-3" />
+              {trend.value}
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-0.5 text-rose-400">
+              <TrendingDown className="h-3 w-3" />
+              {trend.value}
+            </span>
+          )}
+          {sub ? <span className="text-slate-400 font-normal">vs last month</span> : null}
+        </div>
+      ) : sub ? (
+        <p className="mt-2 truncate text-xs text-slate-400">{sub}</p>
+      ) : null}
     </div>
   );
 }

@@ -10,6 +10,7 @@ import {
   Route as RouteIcon,
   ChevronDown,
   Sparkles,
+  CheckCircle2,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -117,67 +118,53 @@ export function HeroSection() {
         <div className="grid items-center gap-12 lg:grid-cols-12 lg:gap-8">
           {/* Left Column: Headline, Copy & CTAs */}
           <div className="lg:col-span-6 xl:col-span-5 text-left">
-            {/* Pill Badge */}
-            <div className="inline-block mb-6">
-              <span className="landing-pill-badge">
-                <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse" />
-                VEHICLE MANAGEMENT SYSTEM
-              </span>
-            </div>
-
-            {/* Display Headline */}
-            <h1 className="text-4xl font-extrabold tracking-tight text-white sm:text-5xl lg:text-6xl leading-[1.12]">
-              Track Your Vehicles.{" "}
-              <span className="block mt-1 landing-gradient-text">Calculate Real Profit.</span>
+            {/* Display Headline matching mockup */}
+            <h1 className="text-4xl font-black tracking-tight text-white sm:text-5xl lg:text-6xl leading-[1.12]">
+              Vehicle Profit <br className="hidden sm:inline" />
+              <span className="landing-gradient-text">Management System</span>
             </h1>
 
-            {/* Subtitle */}
-            <p className="mt-5 text-base sm:text-lg text-slate-300 leading-relaxed max-w-xl">
-              Manage vehicles, trips, income, expenses and get real profit insights — all in one
-              simple and powerful platform for transport business.
+            {/* Subtitle matching mockup */}
+            <p className="mt-4 text-base sm:text-lg text-slate-300 leading-relaxed max-w-xl">
+              Track trips, manage expenses and know the real profit of your vehicles in one place.
             </p>
 
-            {/* CTAs */}
+            {/* 3 Checklist Items matching mockup */}
+            <div className="mt-6 space-y-2.5">
+              {["Trip & Expense Tracking", "Real Profit Calculation", "Reports & Analytics"].map(
+                (item) => (
+                  <div
+                    key={item}
+                    className="flex items-center gap-2.5 text-sm sm:text-base font-semibold text-slate-200"
+                  >
+                    <div className="grid h-5 w-5 place-items-center rounded-full bg-cyan-500/20 text-cyan-400">
+                      <CheckCircle2 className="h-4 w-4" />
+                    </div>
+                    <span>{item}</span>
+                  </div>
+                ),
+              )}
+            </div>
+
+            {/* CTAs matching mockup */}
             <div className="mt-8 flex flex-col sm:flex-row items-stretch sm:items-center gap-3.5">
               <Link
                 to="/auth"
                 search={{ mode: "register" }}
-                className="landing-btn-primary group flex items-center justify-center gap-2.5 rounded-2xl px-6 py-4 text-base font-bold shadow-[0_0_25px_rgba(6,182,212,0.4)]"
+                className="landing-btn-primary group flex items-center justify-center gap-2.5 rounded-xl px-7 py-3.5 text-base font-bold shadow-lg shadow-cyan-500/30"
               >
-                <span>Get Started Free</span>
+                <span>Get Started</span>
                 <ArrowRight className="h-5 w-5 transition-transform duration-200 group-hover:translate-x-1" />
               </Link>
               <button
                 type="button"
                 onClick={handleDemoLogin}
                 disabled={demoLoading}
-                className="landing-btn-glass flex items-center justify-center gap-2 rounded-2xl px-6 py-4 text-base font-bold text-cyan-300 hover:text-white border-cyan-500/30 hover:border-cyan-400 hover:bg-cyan-500/10 transition-all cursor-pointer disabled:opacity-60"
+                className="landing-btn-glass flex items-center justify-center gap-2 rounded-xl px-6 py-3.5 text-base font-bold text-white border-[#1C2B44] hover:border-cyan-400/50 hover:bg-[#132137] transition-all cursor-pointer disabled:opacity-60"
               >
-                <Sparkles className="h-4 w-4 text-cyan-400 animate-pulse" />
-                <span>{demoLoading ? "Starting Demo…" : "Try Demo Account"}</span>
+                <Sparkles className="h-4 w-4 text-cyan-400" />
+                <span>{demoLoading ? "Starting Demo…" : "Watch Demo"}</span>
               </button>
-            </div>
-
-            {/* Trust highlights */}
-            <div className="mt-10 pt-6 border-t border-slate-800/80 flex flex-wrap items-center gap-6 text-xs sm:text-sm font-semibold text-slate-300">
-              <div className="flex items-center gap-2">
-                <div className="grid h-7 w-7 place-items-center rounded-lg bg-cyan-500/15 text-cyan-400">
-                  <Zap className="h-4 w-4" />
-                </div>
-                <span>Easy to Use</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="grid h-7 w-7 place-items-center rounded-lg bg-blue-500/15 text-blue-400">
-                  <ShieldCheck className="h-4 w-4" />
-                </div>
-                <span>Secure Data</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="grid h-7 w-7 place-items-center rounded-lg bg-purple-500/15 text-purple-400">
-                  <TrendingUp className="h-4 w-4" />
-                </div>
-                <span>Real Profit Tracking</span>
-              </div>
             </div>
           </div>
 

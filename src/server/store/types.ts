@@ -77,6 +77,7 @@ export interface SettingsRecord {
   address: string;
   contactNumber: string;
   businessEmail: string;
+  userRole?: string;
   updatedAt: string;
 }
 

@@ -74,6 +74,10 @@ interface TripRow {
   other_expense_items: TripRecord["otherExpenseItems"] | null;
   other_expenses: string | number;
   notes: string;
+  route?: string;
+  driver_name?: string;
+  total_km?: string | number;
+  diesel_liters?: string | number;
   created_at: string | Date;
   updated_at: string | Date;
 }
@@ -90,6 +94,7 @@ interface SettingsRow {
   address: string;
   contact_number: string;
   business_email: string;
+  user_role?: string;
   updated_at: string | Date;
 }
 interface PendingTokenRow {
@@ -151,6 +156,10 @@ function rowToTrip(r: TripRow): TripRecord {
     otherExpenseItems: r.other_expense_items ?? [],
     otherExpenses: Number(r.other_expenses) || 0,
     notes: r.notes ?? "",
+    route: r.route ?? "",
+    driverName: r.driver_name ?? "",
+    totalKm: Number(r.total_km) || 0,
+    dieselLiters: Number(r.diesel_liters) || 0,
     createdAt: toIso(r.created_at),
     updatedAt: toIso(r.updated_at),
   };
@@ -170,6 +179,7 @@ function rowToSettings(r: SettingsRow): SettingsRecord {
     address: r.address ?? "",
     contactNumber: r.contact_number ?? "",
     businessEmail: r.business_email ?? "",
+    userRole: r.user_role ?? "Super Admin",
     updatedAt: toIso(r.updated_at),
   };
 }
@@ -240,6 +250,7 @@ export class PgStore implements Store {
     const consumed = await c.query<ConsumedTokenRow>(
       "SELECT * FROM rideprofit.consumed_reset_tokens",
     );
+
     return {
       users: users.rows.map(rowToUser),
       vehicles: vehicles.rows.map(rowToVehicle),
@@ -397,8 +408,9 @@ export class PgStore implements Store {
         await c.query(
           `INSERT INTO rideprofit.trips
              (_id, user_id, vehicle_id, date, income, diesel, driver_payment, emi_share,
-              other_expense_items, other_expenses, notes, created_at, updated_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,$12,$13)`,
+              other_expense_items, other_expenses, notes, route, driver_name, total_km, diesel_liters,
+              created_at, updated_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,$12,$13,$14,$15,$16,$17)`,
           [
             t._id,
             t.userId,
@@ -411,6 +423,10 @@ export class PgStore implements Store {
             items,
             t.otherExpenses,
             t.notes,
+            t.route ?? "",
+            t.driverName ?? "",
+            Number(t.totalKm) || 0,
+            Number(t.dieselLiters) || 0,
             t.createdAt,
             t.updatedAt,
           ],
@@ -419,7 +435,8 @@ export class PgStore implements Store {
         await c.query(
           `UPDATE rideprofit.trips
              SET vehicle_id=$2, date=$3, income=$4, diesel=$5, driver_payment=$6, emi_share=$7,
-                 other_expense_items=$8::jsonb, other_expenses=$9, notes=$10, updated_at=$11
+                 other_expense_items=$8::jsonb, other_expenses=$9, notes=$10,
+                 route=$11, driver_name=$12, total_km=$13, diesel_liters=$14, updated_at=$15
            WHERE _id=$1`,
           [
             t._id,
@@ -432,6 +449,10 @@ export class PgStore implements Store {
             items,
             t.otherExpenses,
             t.notes,
+            t.route ?? "",
+            t.driverName ?? "",
+            Number(t.totalKm) || 0,
+            Number(t.dieselLiters) || 0,
             t.updatedAt,
           ],
         );
@@ -459,8 +480,8 @@ export class PgStore implements Store {
           `INSERT INTO rideprofit.settings
              (_id, user_id, app_name, transportation_name, business_name, currency,
               default_vehicle_id, full_name, mobile_number, address, contact_number,
-              business_email, updated_at)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+              business_email, user_role, updated_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
           [
             s._id,
             s.userId,
@@ -474,6 +495,7 @@ export class PgStore implements Store {
             s.address,
             s.contactNumber,
             s.businessEmail,
+            s.userRole || "Super Admin",
             s.updatedAt,
           ],
         );
@@ -482,7 +504,7 @@ export class PgStore implements Store {
           `UPDATE rideprofit.settings
              SET app_name=$2, transportation_name=$3, business_name=$4, currency=$5,
                  default_vehicle_id=$6, full_name=$7, mobile_number=$8, address=$9,
-                 contact_number=$10, business_email=$11, updated_at=$12
+                 contact_number=$10, business_email=$11, user_role=$12, updated_at=$13
            WHERE _id=$1`,
           [
             s._id,
@@ -496,6 +518,7 @@ export class PgStore implements Store {
             s.address,
             s.contactNumber,
             s.businessEmail,
+            s.userRole || "Super Admin",
             s.updatedAt,
           ],
         );

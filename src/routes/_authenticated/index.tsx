@@ -6,6 +6,9 @@ import {
   CartesianGrid,
   Line,
   LineChart,
+  PieChart,
+  Pie,
+  Cell,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -21,6 +24,8 @@ import {
   Gauge,
   MapPin,
   User,
+  ArrowUpRight,
+  Filter,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { VehicleSelector } from "@/components/VehicleSelector";
@@ -48,17 +53,6 @@ function getGreeting() {
   if (h < 12) return "Good Morning";
   if (h < 17) return "Good Afternoon";
   return "Good Evening";
-}
-
-function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="glass-card rounded-2xl p-3 sm:p-4">
-      <p className="mb-2 text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground sm:text-xs">
-        {title}
-      </p>
-      {children}
-    </div>
-  );
 }
 
 export function DashboardPage() {
@@ -97,7 +91,7 @@ export function DashboardPage() {
 
   const totals = useMemo(() => aggregate(trips), [trips]);
   const recentTrips = useMemo(
-    () => [...trips].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 5),
+    () => [...trips].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6),
     [trips],
   );
   const vehicleLabel = useMemo(
@@ -111,6 +105,7 @@ export function DashboardPage() {
     [activeVehicles],
   );
 
+  // Time-series chart data
   const chartData = useMemo(() => {
     const byDay = new Map<
       string,
@@ -131,49 +126,92 @@ export function DashboardPage() {
       entry.profit = roundCurrency(entry.profit + profit);
       byDay.set(day, entry);
     });
-    return [...byDay.values()]
-      .sort((a, b) => a.day.localeCompare(b.day))
-      .slice(-14)
-      .map((d) => ({
-        ...d,
-        label: formatDateShort(d.day).slice(0, 5),
-      }));
+
+    const items = [...byDay.values()].sort((a, b) => a.day.localeCompare(b.day));
+
+    // If data is small, provide monthly or continuous markers
+    if (items.length === 0) {
+      return [];
+    }
+
+    return items.slice(-14).map((d) => ({
+      ...d,
+      label: formatDateShort(d.day).slice(0, 6),
+    }));
   }, [trips]);
+
+  // Donut chart data for Profit Ratio
+  const profitRatioData = useMemo(() => {
+    const income = totals.income || 0;
+    const expense = totals.totalExpense || 0;
+    const total = income + expense;
+
+    if (total === 0) {
+      return [
+        { name: "Income", value: 100, color: "#06B6D4" },
+        { name: "Expenses", value: 0, color: "#A855F7" },
+      ];
+    }
+
+    return [
+      { name: "Income", value: Math.max(0, income), color: "#06B6D4" },
+      { name: "Expenses", value: Math.max(0, expense), color: "#A855F7" },
+    ];
+  }, [totals]);
+
+  const profitMarginPercent = useMemo(() => {
+    if (totals.income <= 0) return 0;
+    const margin = (totals.profit / totals.income) * 100;
+    return Math.round(margin * 10) / 10;
+  }, [totals]);
+
+  const incomePercent = useMemo(() => {
+    const total = totals.income + totals.totalExpense;
+    if (total <= 0) return 0;
+    return Math.round((totals.income / total) * 1000) / 10;
+  }, [totals]);
+
+  const expensePercent = useMemo(() => {
+    const total = totals.income + totals.totalExpense;
+    if (total <= 0) return 0;
+    return Math.round((totals.totalExpense / total) * 1000) / 10;
+  }, [totals]);
 
   const presetLabel = DASHBOARD_PRESETS.find((p) => p.value === preset)?.label ?? "This Month";
 
   return (
     <AppShell>
-      <div className="page-stack">
-        <div className="flex items-center justify-between gap-2.5">
-          <div className="min-w-0">
-            <h2 className="truncate text-lg sm:text-xl md:text-2xl font-extrabold">
+      <div className="space-y-6">
+        {/* Top Controls: Greeting & Fleet Description */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
               {getGreeting()}
               {userName ? `, ${userName}` : ""}
             </h2>
-            <p className="truncate text-xs sm:text-sm text-muted-foreground">{appName}</p>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <div className="glass-card rounded-xl px-2.5 py-1.5 text-xs font-semibold text-muted-foreground sm:px-3 sm:py-2">
-              <Calendar className="mr-1.5 inline h-3.5 w-3.5 text-primary" />
-              {presetLabel}
-            </div>
+            <p className="text-xs sm:text-sm text-slate-400">
+              {appName || "Gujarat Logistics Fleet"} · Vehicle accounting & profit tracker
+            </p>
           </div>
         </div>
 
-        <VehicleSelector />
+        {/* Vehicle Selector Strip */}
+        <div className="rounded-2xl border border-[#1C2B44] bg-[#10192A] p-3.5">
+          <VehicleSelector />
+        </div>
 
-        <div className="glass-card rounded-2xl p-2.5 sm:p-3">
+        {/* Date Presets Row */}
+        <div className="rounded-2xl border border-[#1C2B44] bg-[#10192A] p-2 sm:p-2.5">
           <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar py-0.5">
             {DASHBOARD_PRESETS.map((p) => (
               <button
                 key={p.value}
                 onClick={() => setPreset(p.value)}
                 className={cn(
-                  "tap-scale shrink-0 min-h-[38px] sm:min-h-[42px] rounded-full border border-border px-3.5 sm:px-4 py-1.5 text-xs font-semibold text-muted-foreground transition-all",
+                  "tap-scale shrink-0 min-h-[36px] rounded-xl px-3.5 py-1.5 text-xs font-semibold transition-all",
                   preset === p.value
-                    ? "border-cyan-500/50 bg-gradient-to-r from-purple-600/30 to-cyan-500/30 text-white shadow-[0_0_15px_rgba(6,182,212,0.3)] font-bold ring-1 ring-cyan-400/40"
-                    : "hover:bg-slate-800/60 hover:text-white",
+                    ? "bg-cyan-500 text-slate-950 font-bold shadow-md shadow-cyan-500/20"
+                    : "text-slate-400 hover:text-white hover:bg-[#132137]",
                 )}
               >
                 {p.label}
@@ -191,7 +229,7 @@ export function DashboardPage() {
                     fromDate: e.target.value,
                   }))
                 }
-                className="h-10 sm:h-11 rounded-xl bg-secondary/60 text-xs sm:text-sm"
+                className="h-10 rounded-xl bg-[#080D18] border-[#1C2B44] text-xs text-white"
               />
               <Input
                 type="date"
@@ -202,12 +240,13 @@ export function DashboardPage() {
                     toDate: e.target.value,
                   }))
                 }
-                className="h-10 sm:h-11 rounded-xl bg-secondary/60 text-xs sm:text-sm"
+                className="h-10 rounded-xl bg-[#080D18] border-[#1C2B44] text-xs text-white"
               />
             </div>
           ) : null}
         </div>
 
+        {/* 4 KPI Cards (Matching Mockup exactly) */}
         {vehiclesError ? (
           <EmptyState
             icon={<Truck className="h-6 w-6" />}
@@ -218,7 +257,7 @@ export function DashboardPage() {
             action={
               <Button
                 type="button"
-                className="h-11 rounded-xl px-5 font-semibold"
+                className="h-11 rounded-xl px-5 font-semibold bg-cyan-500 text-slate-950 hover:bg-cyan-400"
                 onClick={() => window.location.reload()}
               >
                 Retry
@@ -231,7 +270,10 @@ export function DashboardPage() {
             title="Add your first vehicle"
             description="Vehicles keep every trip, expense and report separated."
             action={
-              <Button asChild className="h-11 rounded-xl px-5 font-semibold">
+              <Button
+                asChild
+                className="h-11 rounded-xl px-5 font-semibold bg-cyan-500 text-slate-950 hover:bg-cyan-400"
+              >
                 <Link to="/vehicles">Add Vehicle</Link>
               </Button>
             }
@@ -242,265 +284,396 @@ export function DashboardPage() {
             title="No active vehicles"
             description="Activate a vehicle on the Vehicles page to see dashboard stats."
             action={
-              <Button asChild className="h-11 rounded-xl px-5 font-semibold">
-                <Link to="/vehicles">Go to Vehicles</Link>
-              </Button>
-            }
-          />
-        ) : tripsQuery.isError ? (
-          <EmptyState
-            icon={<RouteIcon className="h-6 w-6" />}
-            title="Could not load trips"
-            description={
-              tripsQuery.error instanceof Error
-                ? tripsQuery.error.message
-                : "The trip data service is unavailable."
-            }
-            action={
               <Button
-                type="button"
-                className="h-11 rounded-xl px-5 font-semibold"
-                onClick={() => void tripsQuery.refetch()}
+                asChild
+                className="h-11 rounded-xl px-5 font-semibold bg-cyan-500 text-slate-950 hover:bg-cyan-400"
               >
-                Retry
+                <Link to="/vehicles">Go to Vehicles</Link>
               </Button>
             }
           />
         ) : tripsQuery.isLoading ? (
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-24 rounded-2xl" />
+              <Skeleton key={i} className="h-28 rounded-2xl bg-[#10192A]" />
             ))}
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <StatCard
-                label="Vehicles"
-                value={formatIndianNumber(activeVehicles.length)}
-                tone="default"
-                icon={<Truck className="h-4 w-4" />}
-              />
-              <StatCard
-                label="Total Trips"
-                value={formatIndianNumber(totals.trips)}
-                tone="default"
-                icon={<RouteIcon className="h-4 w-4" />}
-              />
+            <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+              {/* 1. Total Income */}
               <StatCard
                 label="Total Income"
                 value={formatMoney(totals.income, symbol)}
-                tone="success"
-                icon={<IndianRupee className="h-4 w-4" />}
-              />
-              <StatCard
-                label="Total Expense"
-                value={formatMoney(totals.totalExpense, symbol)}
-                tone="danger"
-                icon={<TrendingDown className="h-4 w-4" />}
-              />
-            </div>
-
-            <div className="glass-card rounded-2xl p-4 sm:p-5">
-              <div className="flex items-center justify-between">
-                <span className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                  Net Profit
-                </span>
-                <TrendingUp className="h-4 w-4 text-primary" />
-              </div>
-              <p
-                className={cn(
-                  "mt-2 text-2xl font-extrabold tabular-nums sm:text-3xl lg:text-4xl",
-                  totals.profit >= 0 ? "text-primary" : "text-destructive",
-                )}
-              >
-                {formatMoney(totals.profit, symbol)}
-              </p>
-            </div>
-
-            {recentTrips.length > 0 ? (
-              <div>
-                <div className="mb-3 flex items-center justify-between">
-                  <h3 className="text-sm font-bold">Recent Trips</h3>
-                  <Link to="/trips" className="text-xs font-semibold text-primary hover:underline">
-                    View All
-                  </Link>
-                </div>
-                <ul className="space-y-2">
-                  {recentTrips.map((t) => {
-                    const profit = profitOf(t);
-                    const mileage =
-                      t.totalKm && t.dieselLiters
-                        ? calculateMileage(t.totalKm, t.dieselLiters)
-                        : null;
-                    return (
-                      <li key={t._id} className="glass-card glass-card-hover rounded-2xl p-3">
-                        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                              <p className="truncate text-sm font-bold">
-                                {vehicleLabel.get(t.vehicleId) ?? "Vehicle"}
-                              </p>
-                              {t.route ? (
-                                <span className="hidden sm:inline-flex items-center gap-1 text-[0.68rem] text-cyan-400 font-semibold bg-cyan-500/10 border border-cyan-500/20 px-1.5 py-0.5 rounded truncate max-w-[14rem]">
-                                  <MapPin className="h-2.5 w-2.5 shrink-0" />
-                                  <span className="truncate">{t.route}</span>
-                                </span>
-                              ) : null}
-                            </div>
-                            {t.route ? (
-                              <p className="sm:hidden text-[0.7rem] text-cyan-400 font-medium truncate mt-0.5">
-                                📍 {t.route}
-                              </p>
-                            ) : null}
-                            <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                              <span>{formatDateShort(t.date)}</span>
-                              {t.driverName ? (
-                                <span className="inline-flex items-center gap-1 text-[0.68rem] text-muted-foreground font-medium">
-                                  <User className="h-2.5 w-2.5 text-primary" />
-                                  {t.driverName}
-                                </span>
-                              ) : null}
-                              {mileage !== null ? (
-                                <span className="inline-flex items-center gap-1 text-[0.68rem] font-semibold text-amber-400 bg-amber-500/10 border border-amber-500/25 px-1.5 py-0.5 rounded">
-                                  <Gauge className="h-2.5 w-2.5" />
-                                  {mileage} km/L
-                                </span>
-                              ) : null}
-                            </div>
-                          </div>
-                          <span
-                            className={cn(
-                              "text-sm font-bold tabular-nums",
-                              profit >= 0 ? "text-success" : "text-destructive",
-                            )}
-                          >
-                            {formatMoney(profit, symbol)}
-                          </span>
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            ) : null}
-
-            {chartData.length === 0 ? (
-              <EmptyState
-                icon={<RouteIcon className="h-6 w-6" />}
-                title="No trips in this period"
-                description="Record trips in the Trips section to see income and expenses for this period."
-                action={
-                  <Button asChild className="h-10 rounded-xl px-4 font-semibold">
-                    <Link to="/trips">Go to Trips</Link>
-                  </Button>
+                tone="cyan"
+                icon={<IndianRupee className="h-5 w-5" />}
+                sub={
+                  totals.trips > 0
+                    ? `${presetLabel} · ${totals.trips} trip${totals.trips === 1 ? "" : "s"}`
+                    : `${presetLabel} · No trips yet`
                 }
               />
-            ) : (
-              <div className="grid gap-4 xl:grid-cols-2">
-                <ChartCard title="Income vs Expense">
-                  <ResponsiveContainer width="100%" height={220}>
-                    <BarChart
-                      data={chartData}
-                      margin={{
-                        top: 8,
-                        right: 4,
-                        left: -18,
-                        bottom: 0,
-                      }}
-                    >
-                      <CartesianGrid
-                        strokeDasharray="3 3"
-                        stroke="hsl(0 0% 100% / 0.08)"
-                        vertical={false}
+
+              {/* 2. Total Expenses */}
+              <StatCard
+                label="Total Expenses"
+                value={formatMoney(totals.totalExpense, symbol)}
+                tone="danger"
+                icon={<TrendingDown className="h-5 w-5" />}
+                sub={
+                  totals.income > 0
+                    ? `${Math.round((totals.totalExpense / totals.income) * 100)}% of income`
+                    : "Diesel, driver & EMI"
+                }
+              />
+
+              {/* 3. Net Profit */}
+              <StatCard
+                label="Net Profit"
+                value={formatMoney(totals.profit, symbol)}
+                tone={totals.profit >= 0 ? "success" : "danger"}
+                icon={<TrendingUp className="h-5 w-5" />}
+                sub={`${profitMarginPercent}% profit margin`}
+              />
+
+              {/* 4. Total Trips */}
+              <StatCard
+                label="Total Trips"
+                value={formatIndianNumber(totals.trips)}
+                tone="purple"
+                icon={<RouteIcon className="h-5 w-5" />}
+                sub={`${activeVehicles.length} active vehicle${activeVehicles.length === 1 ? "" : "s"}`}
+              />
+            </div>
+
+            {/* Dual Chart Layout matching reference mockup */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              {/* Chart 1: Income vs Expenses (Smooth curves) */}
+              <div className="lg:col-span-2 rounded-2xl border border-[#1C2B44] bg-[#10192A] p-4 sm:p-5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+                  <div>
+                    <h3 className="text-base font-bold text-white tracking-tight">
+                      Income vs Expenses
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      Progression across trips in selected period
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-4 text-xs font-semibold">
+                    <span className="flex items-center gap-1.5 text-cyan-400">
+                      <span className="h-2.5 w-2.5 rounded-full bg-cyan-400 inline-block" />
+                      Income
+                    </span>
+                    <span className="flex items-center gap-1.5 text-purple-400">
+                      <span className="h-2.5 w-2.5 rounded-full bg-purple-400 inline-block" />
+                      Expenses
+                    </span>
+                  </div>
+                </div>
+
+                {chartData.length === 0 ? (
+                  <div className="h-60 flex flex-col items-center justify-center text-center p-4">
+                    <p className="text-sm font-semibold text-slate-300">
+                      No trip data in this period
+                    </p>
+                    <p className="text-xs text-slate-400 mt-1 max-w-sm">
+                      Log trips with diesel and income to populate the revenue and expense
+                      progression curve.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="h-64 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart
+                        data={chartData}
+                        margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="#1C2B44" vertical={false} />
+                        <XAxis
+                          dataKey="label"
+                          tick={{ fontSize: 11, fill: "#94A3B8" }}
+                          axisLine={{ stroke: "#1C2B44" }}
+                          tickLine={false}
+                        />
+                        <YAxis
+                          tick={{ fontSize: 11, fill: "#94A3B8" }}
+                          axisLine={false}
+                          tickLine={false}
+                          width={48}
+                          tickFormatter={(v) => `₹${Math.round(v / 1000)}k`}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: "#080D18",
+                            borderColor: "#1C2B44",
+                            borderRadius: "0.75rem",
+                            color: "#fff",
+                            fontSize: "12px",
+                          }}
+                          formatter={(v: unknown) => formatMoney(Number(v) || 0, symbol)}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="income"
+                          name="Income"
+                          stroke="#06B6D4"
+                          strokeWidth={3}
+                          dot={{ r: 3, fill: "#06B6D4" }}
+                          activeDot={{ r: 6 }}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="expense"
+                          name="Expense"
+                          stroke="#A855F7"
+                          strokeWidth={3}
+                          dot={{ r: 3, fill: "#A855F7" }}
+                          activeDot={{ r: 6 }}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </div>
+
+              {/* Chart 2: Profit Ratio (Donut Chart) */}
+              <div className="rounded-2xl border border-[#1C2B44] bg-[#10192A] p-4 sm:p-5 flex flex-col justify-between">
+                <div>
+                  <h3 className="text-base font-bold text-white tracking-tight">Profit Ratio</h3>
+                  <p className="text-xs text-slate-400">
+                    Net profit margin & operational cost share
+                  </p>
+                </div>
+
+                <div className="relative h-48 my-2 flex items-center justify-center">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={profitRatioData}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={55}
+                        outerRadius={75}
+                        stroke="#10192A"
+                        strokeWidth={3}
+                        startAngle={90}
+                        endAngle={-270}
+                      >
+                        {profitRatioData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: "#080D18",
+                          borderColor: "#1C2B44",
+                          borderRadius: "0.75rem",
+                          color: "#fff",
+                          fontSize: "12px",
+                        }}
+                        formatter={(v: unknown) => formatMoney(Number(v) || 0, symbol)}
                       />
+                    </PieChart>
+                  </ResponsiveContainer>
+
+                  {/* Center percentage label */}
+                  <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                    <span className="text-xl font-black text-white tabular-nums">
+                      {profitMarginPercent}%
+                    </span>
+                    <span className="text-[0.68rem] font-bold text-slate-400 uppercase tracking-wider">
+                      Profit
+                    </span>
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-[#1C2B44] flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="h-3 w-3 rounded-full bg-cyan-400 inline-block" />
+                    <div>
+                      <span className="text-slate-400 block text-[0.68rem]">Income</span>
+                      <span className="font-bold text-white tabular-nums">{incomePercent}%</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="h-3 w-3 rounded-full bg-purple-400 inline-block" />
+                    <div>
+                      <span className="text-slate-400 block text-[0.68rem]">Expenses</span>
+                      <span className="font-bold text-white tabular-nums">{expensePercent}%</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Mobile / Tablet Profit Trend Bar Chart */}
+            <div className="rounded-2xl border border-[#1C2B44] bg-[#10192A] p-4 sm:p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-base font-bold text-white tracking-tight">Profit Trend</h3>
+                  <p className="text-xs text-slate-400">Daily net earnings trajectory</p>
+                </div>
+                <span className="text-xs font-semibold text-emerald-400">
+                  {totals.profit >= 0
+                    ? `+${formatMoney(totals.profit, symbol)}`
+                    : formatMoney(totals.profit, symbol)}
+                </span>
+              </div>
+
+              {chartData.length === 0 ? (
+                <p className="text-xs text-slate-400 py-6 text-center">
+                  No trend data available for this range.
+                </p>
+              ) : (
+                <div className="h-44 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={chartData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#1C2B44" vertical={false} />
                       <XAxis
                         dataKey="label"
-                        tick={{ fontSize: 10 }}
-                        stroke="currentColor"
-                        opacity={0.5}
+                        tick={{ fontSize: 10, fill: "#94A3B8" }}
+                        axisLine={{ stroke: "#1C2B44" }}
+                        tickLine={false}
                       />
                       <YAxis
-                        tick={{ fontSize: 10 }}
-                        stroke="currentColor"
-                        opacity={0.5}
+                        tick={{ fontSize: 10, fill: "#94A3B8" }}
+                        axisLine={false}
+                        tickLine={false}
                         width={44}
+                        tickFormatter={(v) => `₹${Math.round(v / 1000)}k`}
                       />
                       <Tooltip
                         contentStyle={{
-                          background: "hsl(0 0% 8%)",
-                          border: "1px solid hsl(0 0% 100% / 0.1)",
-                          borderRadius: 12,
-                          fontSize: 12,
+                          backgroundColor: "#080D18",
+                          borderColor: "#1C2B44",
+                          borderRadius: "0.75rem",
+                          color: "#fff",
+                          fontSize: "12px",
                         }}
                         formatter={(v: unknown) => formatMoney(Number(v) || 0, symbol)}
                       />
                       <Bar
-                        dataKey="income"
-                        name="Income"
-                        fill="var(--color-primary)"
-                        radius={[4, 4, 0, 0]}
-                      />
-                      <Bar
-                        dataKey="expense"
-                        name="Expense"
-                        fill="var(--color-destructive)"
+                        dataKey="profit"
+                        name="Net Profit"
+                        fill="#06B6D4"
                         radius={[4, 4, 0, 0]}
                       />
                     </BarChart>
                   </ResponsiveContainer>
-                </ChartCard>
+                </div>
+              )}
+            </div>
 
-                <ChartCard title="Profit trend">
-                  <ResponsiveContainer width="100%" height={200}>
-                    <LineChart
-                      data={chartData}
-                      margin={{
-                        top: 8,
-                        right: 4,
-                        left: -18,
-                        bottom: 0,
-                      }}
-                    >
-                      <CartesianGrid
-                        strokeDasharray="3 3"
-                        stroke="hsl(0 0% 100% / 0.08)"
-                        vertical={false}
-                      />
-                      <XAxis
-                        dataKey="label"
-                        tick={{ fontSize: 10 }}
-                        stroke="currentColor"
-                        opacity={0.5}
-                      />
-                      <YAxis
-                        tick={{ fontSize: 10 }}
-                        stroke="currentColor"
-                        opacity={0.5}
-                        width={44}
-                      />
-                      <Tooltip
-                        contentStyle={{
-                          background: "hsl(0 0% 8%)",
-                          border: "1px solid hsl(0 0% 100% / 0.1)",
-                          borderRadius: 12,
-                          fontSize: 12,
-                        }}
-                        formatter={(v: unknown) => formatMoney(Number(v) || 0, symbol)}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="profit"
-                        name="Profit"
-                        stroke="var(--color-primary)"
-                        strokeWidth={2.5}
-                        dot={false}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </ChartCard>
+            {/* Recent Trips Table matching the mockups */}
+            <div className="rounded-2xl border border-[#1C2B44] bg-[#10192A] overflow-hidden">
+              <div className="flex items-center justify-between p-4 sm:p-5 border-b border-[#1C2B44]">
+                <div>
+                  <h3 className="text-base font-bold text-white tracking-tight">Recent Trips</h3>
+                  <p className="text-xs text-slate-400">Latest completed fleet dispatches</p>
+                </div>
+                <Link
+                  to="/trips"
+                  className="inline-flex items-center gap-1 text-xs font-semibold text-cyan-400 hover:text-cyan-300"
+                >
+                  <span>View All Trips</span>
+                  <ArrowUpRight className="h-3.5 w-3.5" />
+                </Link>
               </div>
-            )}
+
+              {recentTrips.length === 0 ? (
+                <div className="p-8 text-center">
+                  <p className="text-sm font-semibold text-slate-300">No trips recorded yet</p>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Record vehicle runs with expenses and earnings in the Trips section to see them
+                    here.
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-[#080D18] text-slate-400 uppercase tracking-wider font-semibold border-b border-[#1C2B44]">
+                      <tr>
+                        <th className="px-4 py-3">Date</th>
+                        <th className="px-4 py-3">Vehicle</th>
+                        <th className="px-4 py-3">Route</th>
+                        <th className="px-4 py-3">Driver</th>
+                        <th className="px-4 py-3">Mileage</th>
+                        <th className="px-4 py-3 text-right">Income</th>
+                        <th className="px-4 py-3 text-right">Expenses</th>
+                        <th className="px-4 py-3 text-right">Profit</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#1C2B44]/70">
+                      {recentTrips.map((t) => {
+                        const profit = profitOf(t);
+                        const expense = totalExpenseOf(t);
+                        const mileage =
+                          t.totalKm && t.dieselLiters
+                            ? calculateMileage(t.totalKm, t.dieselLiters)
+                            : null;
+                        return (
+                          <tr key={t._id} className="hover:bg-[#132137]/50 transition-colors">
+                            <td className="px-4 py-3.5 text-slate-300 font-medium whitespace-nowrap">
+                              {formatDateShort(t.date)}
+                            </td>
+                            <td className="px-4 py-3.5 font-bold text-white whitespace-nowrap">
+                              {vehicleLabel.get(t.vehicleId) ?? "Vehicle"}
+                            </td>
+                            <td className="px-4 py-3.5 text-slate-300 whitespace-nowrap">
+                              {t.route ? (
+                                <span className="inline-flex items-center gap-1 text-cyan-400">
+                                  <MapPin className="h-3 w-3" />
+                                  {t.route}
+                                </span>
+                              ) : (
+                                <span className="text-slate-500">—</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3.5 text-slate-300 whitespace-nowrap">
+                              {t.driverName ? (
+                                <span className="inline-flex items-center gap-1">
+                                  <User className="h-3 w-3 text-slate-400" />
+                                  {t.driverName}
+                                </span>
+                              ) : (
+                                <span className="text-slate-500">—</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3.5 whitespace-nowrap">
+                              {mileage !== null ? (
+                                <span className="inline-flex items-center gap-1 font-semibold text-amber-400 tabular-nums">
+                                  <Gauge className="h-3 w-3" />
+                                  {mileage} km/L
+                                </span>
+                              ) : (
+                                <span className="text-slate-500">—</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3.5 text-right font-semibold text-white tabular-nums whitespace-nowrap">
+                              {formatMoney(Number(t.income) || 0, symbol)}
+                            </td>
+                            <td className="px-4 py-3.5 text-right font-semibold text-rose-400 tabular-nums whitespace-nowrap">
+                              {formatMoney(expense, symbol)}
+                            </td>
+                            <td className="px-4 py-3.5 text-right font-bold tabular-nums whitespace-nowrap">
+                              <span
+                                className={cn(profit >= 0 ? "text-emerald-400" : "text-rose-400")}
+                              >
+                                {formatMoney(profit, symbol)}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </>
         )}
       </div>
@@ -512,13 +685,13 @@ export const Route = createFileRoute("/_authenticated/")({
   ssr: false,
   head: () => ({
     meta: [
-      { title: "Dashboard — Vehicle Calculation System" },
+      { title: "Dashboard — RideProfit Tracker" },
       {
         name: "description",
         content:
-          "Vehicle-wise trip accounting dashboard: track daily income, diesel, driver payments, EMI share and net profit.",
+          "Fleet-wide accounting dashboard: track daily income, diesel, driver payments, and net profit.",
       },
-      { property: "og:title", content: "Dashboard — Vehicle Calculation System" },
+      { property: "og:title", content: "Dashboard — RideProfit Tracker" },
       {
         property: "og:description",
         content: "Track daily trip income, expenses and profit for every vehicle in your fleet.",

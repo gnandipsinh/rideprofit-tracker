@@ -48,6 +48,7 @@ export interface AppSettings {
   address: string;
   contactNumber: string;
   businessEmail: string;
+  userRole?: string;
 }
 
 export interface ReportSummary {

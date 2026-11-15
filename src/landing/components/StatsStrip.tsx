@@ -3,28 +3,28 @@ import { Users, Truck, Route as RouteIcon, TrendingUp } from "lucide-react";
 export function StatsStrip() {
   const stats = [
     {
+      value: "1,200+",
+      label: "Vehicles",
+      icon: Truck,
+      color: "text-cyan-400 bg-cyan-500/15 border-cyan-500/25",
+    },
+    {
+      value: "25,000+",
+      label: "Trips",
+      icon: RouteIcon,
+      color: "text-blue-400 bg-blue-500/15 border-blue-500/25",
+    },
+    {
       value: "500+",
       label: "Happy Users",
       icon: Users,
       color: "text-purple-400 bg-purple-500/15 border-purple-500/25",
     },
     {
-      value: "1,200+",
-      label: "Vehicles Managed",
-      icon: Truck,
-      color: "text-blue-400 bg-blue-500/15 border-blue-500/25",
-    },
-    {
-      value: "25,000+",
-      label: "Trips Recorded",
-      icon: RouteIcon,
-      color: "text-cyan-400 bg-cyan-500/15 border-cyan-500/25",
-    },
-    {
       value: "99%",
-      label: "User Satisfaction",
+      label: "Satisfaction",
       icon: TrendingUp,
-      color: "text-indigo-400 bg-indigo-500/15 border-indigo-500/25",
+      color: "text-emerald-400 bg-emerald-500/15 border-emerald-500/25",
     },
   ];
 

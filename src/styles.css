@@ -66,22 +66,22 @@
 }
 
 :root {
-  --radius: 1rem;
+  --radius: 0.875rem;
 
-  /* Core brand colors - RideProfit Tracker (Midnight, Electric Cyan, Royal Blue, Neon Purple) */
-  --background: #02050c;
+  /* Core brand colors - RideProfit Tracker (Obsidian Navy, Charcoal, Electric Cyan, Royal Blue, Neon Purple) */
+  --background: #0b111e;
   --foreground: #f8fafc;
 
-  --surface: #040a14;
-  --surface-raised: #081324;
+  --surface: #0e1626;
+  --surface-raised: #121d32;
 
-  --card: #060e1b;
+  --card: #10192a;
   --card-foreground: #f8fafc;
-  --popover: #060e1b;
+  --popover: #10192a;
   --popover-foreground: #f8fafc;
 
   --primary: #06b6d4;
-  --primary-foreground: #ffffff;
+  --primary-foreground: #04101a;
 
   --cyan: #06b6d4;
   --cyan-soft: #22d3ee;
@@ -93,13 +93,13 @@
   --gold: #06b6d4;
   --gold-soft: #22d3ee;
 
-  --secondary: #0c182c;
+  --secondary: #132137;
   --secondary-foreground: #f8fafc;
 
-  --muted: #0c182c;
+  --muted: #132137;
   --muted-foreground: #94a3b8;
 
-  --accent: #0e223d;
+  --accent: #172844;
   --accent-foreground: #f8fafc;
 
   --destructive: #f43f5e;
@@ -111,8 +111,8 @@
   --warning: #f59e0b;
   --warning-foreground: #451a03;
 
-  --border: #13233c;
-  --input: #0e1d33;
+  --border: #1c2b44;
+  --input: #132137;
   --ring: #06b6d4;
 
   --chart-1: #06b6d4;
@@ -121,22 +121,22 @@
   --chart-4: #a855f7;
   --chart-5: #3b82f6;
 
-  --sidebar: #02050c;
+  --sidebar: #080d18;
   --sidebar-foreground: #f8fafc;
   --sidebar-primary: #06b6d4;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #0c182c;
+  --sidebar-primary-foreground: #04101a;
+  --sidebar-accent: #10192a;
   --sidebar-accent-foreground: #f8fafc;
-  --sidebar-border: #13233c;
+  --sidebar-border: #162238;
   --sidebar-ring: #06b6d4;
 
   --gradient-gold: linear-gradient(90deg, #06b6d4 0%, #2563eb 100%);
   --gradient-primary: linear-gradient(90deg, #06b6d4 0%, #2563eb 100%);
   --gradient-brand: linear-gradient(135deg, #06b6d4 0%, #2563eb 50%, #a855f7 100%);
-  --gradient-surface: linear-gradient(160deg, rgba(8, 17, 32, 0.85) 0%, rgba(4, 10, 20, 0.95) 100%);
+  --gradient-surface: linear-gradient(160deg, rgba(16, 25, 42, 0.95) 0%, rgba(11, 17, 30, 0.98) 100%);
   --shadow-elegant: 0 18px 40px -22px rgba(0, 0, 0, 0.85);
-  --shadow-gold: 0 4px 20px -2px rgba(6, 182, 212, 0.45);
-  --shadow-card: 0 18px 50px -30px rgba(0, 0, 0, 0.85);
+  --shadow-gold: 0 4px 16px -2px rgba(6, 182, 212, 0.35);
+  --shadow-card: 0 10px 30px -15px rgba(0, 0, 0, 0.7);
 }
 
 .dark {
@@ -155,28 +155,12 @@
   }
 
   body {
-    background-color: var(--color-background);
+    background-color: #0b111e;
     color: var(--color-foreground);
     font-family: var(--font-sans);
-    background-image:
-      radial-gradient(1100px 520px at 12% -8%, rgba(6, 182, 212, 0.12), transparent),
-      radial-gradient(900px 520px at 100% 0%, rgba(168, 85, 247, 0.12), transparent),
-      linear-gradient(180deg, #02050c 0%, #060e1b 48%, #02050c 100%);
+    background-image: linear-gradient(180deg, #0b111e 0%, #090e1a 100%);
     background-attachment: fixed;
     overflow-x: hidden;
-  }
-
-  body::before {
-    content: "";
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    background-image:
-      linear-gradient(rgba(6, 182, 212, 0.035) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(6, 182, 212, 0.035) 1px, transparent 1px);
-    background-size: 56px 56px;
-    mask-image: linear-gradient(to bottom, transparent, black 14%, transparent 82%);
-    opacity: 0.35;
   }
 
   #root {
@@ -500,3 +484,35 @@
 .landing-glow-blue {
   box-shadow: 0 0 40px -10px rgba(37, 99, 235, 0.4);
 }
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 8mm;
+  }
+  html, body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  aside,
+  header,
+  nav,
+  button,
+  .print\:hidden {
+    display: none !important;
+  }
+}
+
+

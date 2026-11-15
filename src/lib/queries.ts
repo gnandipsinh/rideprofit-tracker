@@ -151,6 +151,7 @@ export function useSaveSettings() {
       address: string;
       contactNumber: string;
       businessEmail: string;
+      userRole?: string;
     }) => api.updateSettings(payload),
     onSuccess: () => {
       invalidate();

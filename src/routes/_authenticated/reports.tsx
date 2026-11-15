@@ -70,6 +70,8 @@ import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/reports")({
   ssr: false,
+  validateSearch: (search: Record<string, unknown>): { tab?: "profit" | undefined } =>
+    search["tab"] === "profit" ? { tab: "profit" } : {},
   head: () => ({
     meta: [
       { title: "Reports — Vehicle Calculation System" },
@@ -98,6 +100,8 @@ function ReportsPage() {
     activeVehicles,
     vehiclesLoading,
   } = useApp();
+  const { tab } = Route.useSearch();
+  const isProfitView = tab === "profit";
 
   // Filter state
   const [filterVehicleId, setFilterVehicleId] = useState<string>(contextVehicleId || ALL_VEHICLES);
@@ -337,10 +341,12 @@ function ReportsPage() {
         <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
           <div className="min-w-0">
             <h2 className="text-xl sm:text-2xl font-extrabold text-foreground tracking-tight">
-              Reports
+              {isProfitView ? "Profit Analysis" : "Reports"}
             </h2>
             <p className="text-xs sm:text-sm text-muted-foreground truncate">
-              Analyze vehicle-wise income, expenses and profit
+              {isProfitView
+                ? "Net margin, profit ratio, and vehicle-wise earnings breakdown"
+                : "Analyze vehicle-wise income, expenses and profit"}
             </p>
           </div>
           {filteredReport && filteredReport.rows.length > 0 ? (
@@ -362,7 +368,7 @@ function ReportsPage() {
               </Button>
               <Button
                 onClick={() => setPreviewOpen(true)}
-                className="h-10 sm:h-11 rounded-xl px-3.5 sm:px-5 font-bold shadow-[0_4px_20px_-2px_rgba(6,182,212,0.45)] bg-gradient-to-r from-cyan-500 to-blue-600 text-white hover:from-cyan-400 hover:to-blue-500 tap-scale text-xs sm:text-sm"
+                className="h-10 sm:h-11 rounded-xl px-3.5 sm:px-5 font-bold bg-cyan-500 text-slate-950 hover:bg-cyan-400 shadow-md shadow-cyan-500/20 tap-scale text-xs sm:text-sm"
               >
                 <FileSpreadsheet className="mr-1.5 h-4 w-4" />
                 <span>Generate PDF</span>
@@ -484,7 +490,7 @@ function ReportsPage() {
               type="button"
               size="sm"
               onClick={handleApplyFilter}
-              className="h-9 sm:h-10 rounded-xl px-4 text-xs font-bold bg-gradient-to-r from-cyan-500 to-blue-600 text-white hover:from-cyan-400 hover:to-blue-500 shadow-[0_4px_20px_-2px_rgba(6,182,212,0.45)] tap-scale"
+              className="h-9 sm:h-10 rounded-xl px-4 text-xs font-bold bg-cyan-500 text-slate-950 hover:bg-cyan-400 shadow-md shadow-cyan-500/20 tap-scale"
             >
               <Filter className="mr-1.5 h-3.5 w-3.5" />
               Apply Filter

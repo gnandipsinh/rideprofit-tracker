@@ -9,13 +9,17 @@ import {
   MapPin,
   User,
   Gauge,
+  Plus,
+  IndianRupee,
+  Calendar,
+  Fuel,
+  Receipt,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { VehicleSelector } from "@/components/VehicleSelector";
 import { EmptyState } from "@/components/EmptyState";
 import { TripFormDialog } from "@/components/TripFormDialog";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { calculateMileage, formatTripWhatsAppMessage, openWhatsAppShare } from "@/lib/whatsapp";
@@ -32,24 +36,26 @@ import {
 import { useApp } from "@/lib/app-context";
 import { useDeleteTrip, useTrips } from "@/lib/queries";
 import { aggregate, profitOf } from "@/lib/calc";
-import { formatDate, formatMoney, todayInput, toDateInput } from "@/lib/format";
+import { formatDate, formatDateShort, formatMoney, todayInput, toDateInput } from "@/lib/format";
 import type { Trip } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/trips")({
   ssr: false,
+  validateSearch: (search: Record<string, unknown>): { tab?: "trips" | "expenses" | undefined } =>
+    search["tab"] === "expenses" ? { tab: "expenses" } : {},
   head: () => ({
     meta: [
-      { title: "Trips — Vehicle Calculation System" },
+      { title: "Trips & Expenses — RideProfit Tracker" },
       {
         name: "description",
         content:
-          "Record daily trips with income, diesel, editable driver payment, multiple other expenses and EMI share.",
+          "Record and review daily trips, mileage, diesel expenses, driver payments, and net profit.",
       },
-      { property: "og:title", content: "Trips — Vehicle Calculation System" },
+      { property: "og:title", content: "Trips & Expenses — RideProfit Tracker" },
       {
         property: "og:description",
-        content: "Add and edit daily trips with automatic profit calculation.",
+        content: "Add and edit daily vehicle trips with automatic financial calculations.",
       },
     ],
   }),
@@ -64,6 +70,8 @@ function firstOfMonth(): string {
 function TripsPage() {
   const { symbol, selectedVehicleId, activeVehicles, appName } = useApp();
   const remove = useDeleteTrip();
+  const { tab } = Route.useSearch();
+  const isExpenseView = tab === "expenses";
 
   const [range, setRange] = useState({ fromDate: firstOfMonth(), toDate: todayInput() });
   const [formTrip, setFormTrip] = useState<Trip | null>(null);
@@ -76,20 +84,25 @@ function TripsPage() {
     fromDate: range.fromDate,
     toDate: range.toDate,
   });
+
   const activeVehicleIds = useMemo(
     () => new Set(activeVehicles.map((v) => v._id)),
     [activeVehicles],
   );
+
   const trips = useMemo(() => {
     const raw = tripsQuery.data ?? [];
     if (activeVehicleIds.size === 0) return raw;
     return raw.filter((t) => activeVehicleIds.has(t.vehicleId));
   }, [tripsQuery.data, activeVehicleIds]);
+
   const totals = useMemo(() => aggregate(trips), [trips]);
+
   const vehicleName = useMemo(
     () => new Map(activeVehicles.map((v) => [v._id, v.name])),
     [activeVehicles],
   );
+
   const vehicleNumber = useMemo(
     () => new Map(activeVehicles.map((v) => [v._id, v.vehicleNumber])),
     [activeVehicles],
@@ -101,308 +114,388 @@ function TripsPage() {
     return trips.filter((t) => {
       const vName = vehicleName.get(t.vehicleId)?.toLowerCase() ?? "";
       const vNum = vehicleNumber.get(t.vehicleId)?.toLowerCase() ?? "";
+      const route = t.route?.toLowerCase() ?? "";
+      const driver = t.driverName?.toLowerCase() ?? "";
       const date = formatDate(t.date).toLowerCase();
-      return vName.includes(q) || vNum.includes(q) || date.includes(q);
+      return (
+        vName.includes(q) ||
+        vNum.includes(q) ||
+        route.includes(q) ||
+        driver.includes(q) ||
+        date.includes(q)
+      );
     });
   }, [trips, search, vehicleName, vehicleNumber]);
 
   return (
     <AppShell>
-      <div className="page-stack">
-        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3">
+      <div className="space-y-6">
+        {/* Top Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h2 className="text-xl font-extrabold sm:text-2xl">Trips</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              Daily income, expenses and profit
+            <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+              {isExpenseView ? "Fleet Expenses" : "Trips & Expenses"}
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-400">
+              {isExpenseView
+                ? "Itemized diesel, driver wages, EMI share, and miscellaneous trip costs"
+                : "Track routes, diesel, driver payroll, and net profit per trip"}
             </p>
           </div>
+
           <Button
             onClick={() => {
               setFormTrip(null);
               setFormOpen(true);
             }}
-            className="h-11 shrink-0 rounded-xl px-4 font-semibold"
+            className="h-11 px-5 rounded-xl font-bold bg-cyan-500 text-slate-950 hover:bg-cyan-400 shadow-md shadow-cyan-500/20 tap-scale flex items-center gap-2"
           >
-            <span className="mr-1.5">+</span> Add Trip
+            <Plus className="h-4 w-4" />
+            <span>Add Trip</span>
           </Button>
         </div>
 
-        <VehicleSelector />
-
-        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Search trips..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="h-12 rounded-xl bg-secondary/60 pl-9 text-base"
-            />
-          </div>
-
-          <div className="glass-card grid grid-cols-2 gap-2 rounded-2xl p-2">
-            <Input
-              type="date"
-              aria-label="From date"
-              value={range.fromDate}
-              onChange={(e) => setRange((r) => ({ ...r, fromDate: e.target.value }))}
-              className="h-11 min-w-0 rounded-xl bg-secondary/60"
-            />
-            <Input
-              type="date"
-              aria-label="To date"
-              value={range.toDate}
-              onChange={(e) => setRange((r) => ({ ...r, toDate: e.target.value }))}
-              className="h-11 min-w-0 rounded-xl bg-secondary/60"
-            />
-          </div>
+        {/* Vehicle Filter Strip */}
+        <div className="rounded-2xl border border-[#1C2B44] bg-[#10192A] p-3.5">
+          <VehicleSelector />
         </div>
 
-        <div className="fleet-panel grid grid-cols-3 gap-3 rounded-2xl p-3 sm:p-4">
-          <div className="text-center">
-            <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-              Income
-            </p>
-            <p className="mt-1 truncate text-sm font-bold tabular-nums text-primary sm:text-base">
+        {/* 3 Summary Metric Cards */}
+        <div className="grid grid-cols-3 gap-3 sm:gap-4">
+          <div className="rounded-2xl border border-[#1C2B44] bg-[#10192A] p-3.5 sm:p-4 text-center">
+            <span className="text-[0.65rem] sm:text-xs font-semibold text-slate-400 uppercase tracking-wider block">
+              Total Income
+            </span>
+            <p className="mt-1 text-base sm:text-xl font-black text-cyan-400 tabular-nums">
               {formatMoney(totals.income, symbol)}
             </p>
           </div>
-          <div className="text-center">
-            <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-              Expense
-            </p>
-            <p className="mt-1 truncate text-sm font-bold tabular-nums text-destructive sm:text-base">
+
+          <div className="rounded-2xl border border-[#1C2B44] bg-[#10192A] p-3.5 sm:p-4 text-center">
+            <span className="text-[0.65rem] sm:text-xs font-semibold text-slate-400 uppercase tracking-wider block">
+              Total Expenses
+            </span>
+            <p className="mt-1 text-base sm:text-xl font-black text-rose-400 tabular-nums">
               {formatMoney(totals.totalExpense, symbol)}
             </p>
           </div>
-          <div className="text-center">
-            <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-              Profit
-            </p>
+
+          <div className="rounded-2xl border border-[#1C2B44] bg-[#10192A] p-3.5 sm:p-4 text-center">
+            <span className="text-[0.65rem] sm:text-xs font-semibold text-slate-400 uppercase tracking-wider block">
+              Net Profit
+            </span>
             <p
-              className={`mt-1 truncate text-sm font-bold tabular-nums sm:text-base ${totals.profit >= 0 ? "text-success" : "text-destructive"}`}
+              className={cn(
+                "mt-1 text-base sm:text-xl font-black tabular-nums",
+                totals.profit >= 0 ? "text-emerald-400" : "text-rose-400",
+              )}
             >
               {formatMoney(totals.profit, symbol)}
             </p>
           </div>
         </div>
 
+        {isExpenseView ? (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="rounded-2xl border border-rose-500/25 bg-[#10192A] p-3.5">
+              <span className="text-[0.65rem] font-semibold text-slate-400 uppercase tracking-wider block">
+                Diesel Fuel
+              </span>
+              <p className="mt-1 text-base sm:text-lg font-black text-rose-400 tabular-nums">
+                {formatMoney(totals.diesel, symbol)}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-[#1C2B44] bg-[#10192A] p-3.5">
+              <span className="text-[0.65rem] font-semibold text-slate-400 uppercase tracking-wider block">
+                Driver Wages
+              </span>
+              <p className="mt-1 text-base sm:text-lg font-black text-white tabular-nums">
+                {formatMoney(totals.driverPayment, symbol)}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-[#1C2B44] bg-[#10192A] p-3.5">
+              <span className="text-[0.65rem] font-semibold text-slate-400 uppercase tracking-wider block">
+                EMI Share
+              </span>
+              <p className="mt-1 text-base sm:text-lg font-black text-purple-400 tabular-nums">
+                {formatMoney(totals.emiShare, symbol)}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-[#1C2B44] bg-[#10192A] p-3.5">
+              <span className="text-[0.65rem] font-semibold text-slate-400 uppercase tracking-wider block">
+                Other Costs
+              </span>
+              <p className="mt-1 text-base sm:text-lg font-black text-amber-400 tabular-nums">
+                {formatMoney(totals.otherExpenses, symbol)}
+              </p>
+            </div>
+          </div>
+        ) : null}
+
+        {/* Filters: Search & Date Range */}
+        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <Input
+              placeholder="Search by vehicle, driver, route or date..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="h-11 rounded-xl border-[#1C2B44] bg-[#10192A] pl-11 text-sm text-white placeholder:text-slate-400"
+            />
+          </div>
+
+          <div className="flex items-center gap-2 rounded-xl border border-[#1C2B44] bg-[#10192A] p-1">
+            <Input
+              type="date"
+              aria-label="From date"
+              value={range.fromDate}
+              onChange={(e) => setRange((r) => ({ ...r, fromDate: e.target.value }))}
+              className="h-9 w-36 rounded-lg bg-[#080D18] border-[#1C2B44] text-xs text-white"
+            />
+            <span className="text-slate-500 text-xs">to</span>
+            <Input
+              type="date"
+              aria-label="To date"
+              value={range.toDate}
+              onChange={(e) => setRange((r) => ({ ...r, toDate: e.target.value }))}
+              className="h-9 w-36 rounded-lg bg-[#080D18] border-[#1C2B44] text-xs text-white"
+            />
+          </div>
+        </div>
+
+        {/* Trips Content */}
         {tripsQuery.isLoading ? (
           <div className="space-y-3">
             {Array.from({ length: 4 }).map((_, i) => (
-              <Skeleton key={i} className="h-28 rounded-2xl" />
+              <Skeleton key={i} className="h-32 rounded-2xl bg-[#10192A]" />
             ))}
           </div>
         ) : filtered.length === 0 ? (
           <EmptyState
             icon={<RouteIcon className="h-6 w-6" />}
-            title={search ? "No trips found" : "No trips found"}
+            title={search ? "No matching trips found" : "No trips recorded for this range"}
             description={
               search
-                ? "Try adjusting your search."
-                : "Use the Add Trip button to record your first entry for this period."
+                ? "Try adjusting your search criteria or resetting filters."
+                : "Click Add Trip above to record your first vehicle run with income and diesel costs."
+            }
+            action={
+              !search ? (
+                <Button
+                  onClick={() => {
+                    setFormTrip(null);
+                    setFormOpen(true);
+                  }}
+                  className="h-11 rounded-xl px-5 font-bold bg-cyan-500 text-slate-950 hover:bg-cyan-400"
+                >
+                  Add Trip
+                </Button>
+              ) : undefined
             }
           />
         ) : (
-          <ul className="grid gap-3 xl:grid-cols-2">
+          <div className="space-y-3">
             {filtered.map((t) => {
               const profit = profitOf(t);
               const totalExpense = t.diesel + t.driverPayment + t.otherExpenses + t.emiShare;
               const vName = vehicleName.get(t.vehicleId) ?? "Vehicle";
               const vNum = vehicleNumber.get(t.vehicleId);
               const vType = activeVehicles.find((v) => v._id === t.vehicleId)?.type ?? "";
+              const mileage =
+                t.totalKm && t.dieselLiters ? calculateMileage(t.totalKm, t.dieselLiters) : null;
+
               return (
-                <li key={t._id} className="glass-card overflow-hidden rounded-2xl">
-                  <div className="p-4">
-                    <div className="flex items-start justify-between mb-2.5 gap-2">
-                      <div className="min-w-0">
-                        <h3 className="truncate text-base font-bold">{formatDate(t.date)}</h3>
-                        <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                          {vType || vName}
-                          {vNum ? ` · ${vNum}` : ""}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-1 shrink-0">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          title="Share on WhatsApp"
-                          aria-label="Share trip summary on WhatsApp"
-                          className="h-9 w-9 rounded-xl text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/15"
-                          onClick={() => {
-                            const vLabel = [vType || vName, vNum].filter(Boolean).join(" · ");
-                            const msg = formatTripWhatsAppMessage(t, vLabel, appName, symbol);
-                            openWhatsAppShare(msg);
-                          }}
-                        >
-                          <MessageCircle className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          aria-label={`Edit trip on ${formatDate(t.date)}`}
-                          className="h-9 w-9 rounded-xl text-primary hover:bg-primary/10"
-                          onClick={() => {
-                            setFormTrip(t);
-                            setFormOpen(true);
-                          }}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          aria-label={`Delete trip on ${formatDate(t.date)}`}
-                          className="h-9 w-9 rounded-xl text-destructive hover:bg-destructive/10"
-                          onClick={() => setConfirm(t)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-
-                    {/* Route, Driver Name & Mileage Badges */}
-                    {(t.route || t.driverName || (t.totalKm && t.dieselLiters)) && (
-                      <div className="flex flex-wrap items-center gap-1.5 mb-3">
-                        {t.route ? (
-                          <Badge
-                            variant="outline"
-                            className="border-cyan-500/35 bg-cyan-500/10 text-cyan-300 text-[0.68rem] py-0.5 px-2 gap-1"
-                          >
-                            <MapPin className="h-3 w-3 text-cyan-400" />
-                            <span>{t.route}</span>
-                          </Badge>
-                        ) : null}
-                        {t.driverName ? (
-                          <Badge
-                            variant="outline"
-                            className="border-slate-700 bg-slate-800/80 text-slate-300 text-[0.68rem] py-0.5 px-2 gap-1"
-                          >
-                            <User className="h-3 w-3 text-cyan-400" />
-                            <span>{t.driverName}</span>
-                          </Badge>
-                        ) : null}
-                        {calculateMileage(t.totalKm, t.dieselLiters) ? (
-                          <Badge
-                            variant="outline"
-                            className="border-emerald-500/35 bg-emerald-500/10 text-emerald-300 text-[0.68rem] py-0.5 px-2 gap-1 font-mono"
-                          >
-                            <Gauge className="h-3 w-3 text-emerald-400" />
-                            <span>
-                              {calculateMileage(t.totalKm, t.dieselLiters)} km/L ({t.totalKm} km)
-                            </span>
-                          </Badge>
-                        ) : null}
-                      </div>
-                    )}
-
-                    <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
-                      <div>
-                        <p className="text-muted-foreground">Income</p>
-                        <p className="font-bold tabular-nums">{formatMoney(t.income, symbol)}</p>
+                <div
+                  key={t._id}
+                  className="rounded-2xl border border-[#1C2B44] bg-[#10192A] p-4 sm:p-5 transition-all hover:border-cyan-500/40"
+                >
+                  {/* Top Row: Date, Vehicle, Actions */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#1C2B44]/70">
+                    <div className="flex items-center gap-3">
+                      <div className="grid h-10 w-10 place-items-center rounded-xl bg-cyan-500/15 text-cyan-400 ring-1 ring-cyan-500/30">
+                        <RouteIcon className="h-5 w-5" />
                       </div>
                       <div>
-                        <p className="text-muted-foreground">Diesel</p>
-                        <p className="font-bold tabular-nums">{formatMoney(t.diesel, symbol)}</p>
-                      </div>
-                      <div>
-                        <p className="text-muted-foreground">Driver</p>
-                        <p className="font-bold tabular-nums">
-                          {formatMoney(t.driverPayment, symbol)}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-muted-foreground">Other</p>
-                        <p className="font-bold tabular-nums">
-                          {formatMoney(t.otherExpenses, symbol)}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-muted-foreground">EMI</p>
-                        <p className="font-bold tabular-nums">{formatMoney(t.emiShare, symbol)}</p>
-                      </div>
-                      <div>
-                        <p className="text-muted-foreground">Total</p>
-                        <p className="font-bold tabular-nums">
-                          {formatMoney(totalExpense, symbol)}
-                        </p>
-                      </div>
-                    </div>
-
-                    {t.otherExpenseItems && t.otherExpenseItems.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 mt-3">
-                        {t.otherExpenseItems.map((item, idx) => (
-                          <span
-                            key={idx}
-                            className="inline-flex items-center gap-1 rounded-lg bg-secondary/60 px-2 py-1 text-xs text-muted-foreground"
-                          >
-                            {item.name} - {formatMoney(item.amount, symbol)}
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-base font-bold text-white">{formatDate(t.date)}</h3>
+                          <span className="font-mono text-xs font-bold text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/20">
+                            {vNum || vName}
                           </span>
-                        ))}
+                        </div>
+                        <p className="text-xs text-slate-400 mt-0.5">{vType || vName}</p>
                       </div>
-                    )}
+                    </div>
 
-                    {t.notes ? (
-                      <p className="mt-3 rounded-xl border border-border/55 bg-background/25 px-3 py-2 text-xs leading-relaxed text-foreground/75">
-                        {t.notes}
-                      </p>
-                    ) : null}
+                    <div className="flex items-center gap-1.5 self-end sm:self-center">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        title="Share on WhatsApp"
+                        aria-label="Share trip summary on WhatsApp"
+                        className="h-9 px-3 rounded-xl text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/15 border border-[#1C2B44]"
+                        onClick={() => {
+                          const vLabel = [vType || vName, vNum].filter(Boolean).join(" · ");
+                          const msg = formatTripWhatsAppMessage(t, vLabel, appName, symbol);
+                          openWhatsAppShare(msg);
+                        }}
+                      >
+                        <MessageCircle className="h-4 w-4 mr-1.5" />
+                        <span className="text-xs font-semibold">Share</span>
+                      </Button>
 
-                    <div className="flex items-center justify-between mt-3 pt-3 border-t border-border/50">
-                      <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                        Profit
-                      </p>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label="Edit trip"
+                        className="h-9 w-9 rounded-xl text-cyan-400 hover:text-white hover:bg-cyan-500/15 border border-[#1C2B44]"
+                        onClick={() => {
+                          setFormTrip(t);
+                          setFormOpen(true);
+                        }}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label="Delete trip"
+                        className="h-9 w-9 rounded-xl text-rose-400 hover:text-white hover:bg-rose-500/15 border border-[#1C2B44]"
+                        onClick={() => setConfirm(t)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Middle Row: Route, Driver, Mileage Tags */}
+                  {(t.route || t.driverName || mileage) && (
+                    <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+                      {t.route ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-cyan-500/10 border border-cyan-500/20 text-cyan-300 font-medium">
+                          <MapPin className="h-3.5 w-3.5 text-cyan-400" />
+                          <span>{t.route}</span>
+                        </span>
+                      ) : null}
+
+                      {t.driverName ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#080D18] border border-[#1C2B44] text-slate-300 font-medium">
+                          <User className="h-3.5 w-3.5 text-slate-400" />
+                          <span>{t.driverName}</span>
+                        </span>
+                      ) : null}
+
+                      {mileage ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/25 text-amber-300 font-bold tabular-nums">
+                          <Gauge className="h-3.5 w-3.5 text-amber-400" />
+                          <span>
+                            {mileage} km/L ({t.totalKm} km / {t.dieselLiters} L)
+                          </span>
+                        </span>
+                      ) : null}
+                    </div>
+                  )}
+
+                  {/* Financial Grid */}
+                  <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-2 pt-3 border-t border-[#1C2B44]/70">
+                    <div className="rounded-xl bg-[#080D18]/70 border border-[#1C2B44] p-2.5">
+                      <span className="text-[0.65rem] font-semibold text-slate-400 uppercase tracking-wider block">
+                        Income
+                      </span>
+                      <span className="text-sm font-bold text-white tabular-nums">
+                        {formatMoney(Number(t.income) || 0, symbol)}
+                      </span>
+                    </div>
+
+                    <div className="rounded-xl bg-[#080D18]/70 border border-[#1C2B44] p-2.5">
+                      <span className="text-[0.65rem] font-semibold text-slate-400 uppercase tracking-wider block">
+                        Diesel
+                      </span>
+                      <span className="text-sm font-bold text-rose-400 tabular-nums">
+                        {formatMoney(t.diesel, symbol)}
+                      </span>
+                    </div>
+
+                    <div className="rounded-xl bg-[#080D18]/70 border border-[#1C2B44] p-2.5">
+                      <span className="text-[0.65rem] font-semibold text-slate-400 uppercase tracking-wider block">
+                        Driver + Other
+                      </span>
+                      <span className="text-sm font-bold text-slate-300 tabular-nums">
+                        {formatMoney(t.driverPayment + t.otherExpenses + t.emiShare, symbol)}
+                      </span>
+                    </div>
+
+                    <div className="rounded-xl bg-[#080D18]/70 border border-[#1C2B44] p-2.5">
+                      <span className="text-[0.65rem] font-semibold text-slate-400 uppercase tracking-wider block">
+                        Net Profit
+                      </span>
                       <span
                         className={cn(
-                          "text-lg font-bold tabular-nums",
-                          profit >= 0 ? "text-success" : "text-destructive",
+                          "text-sm font-black tabular-nums",
+                          profit >= 0 ? "text-emerald-400" : "text-rose-400",
                         )}
                       >
-                        {profit >= 0 ? "" : "-"}
-                        {formatMoney(Math.abs(profit), symbol)}
+                        {formatMoney(profit, symbol)}
                       </span>
                     </div>
                   </div>
-                </li>
+
+                  {/* Itemized expenses if any */}
+                  {t.otherExpenseItems && t.otherExpenseItems.length > 0 ? (
+                    <div className="mt-2.5 flex flex-wrap items-center gap-1.5 text-[0.7rem] text-slate-400">
+                      <span className="font-semibold text-slate-500">Expenses:</span>
+                      {t.otherExpenseItems.map((item, idx) => (
+                        <span
+                          key={idx}
+                          className="rounded bg-[#080D18] px-2 py-0.5 border border-[#1C2B44] text-slate-300"
+                        >
+                          {item.name}: {formatMoney(item.amount, symbol)}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  {t.notes ? (
+                    <p className="mt-2 text-xs text-slate-400 italic">"{t.notes}"</p>
+                  ) : null}
+                </div>
               );
             })}
-          </ul>
+          </div>
         )}
+
+        {/* Trip Form Dialog */}
+        <TripFormDialog open={formOpen} onOpenChange={setFormOpen} trip={formTrip} />
+
+        {/* Delete Confirmation Alert */}
+        <AlertDialog open={Boolean(confirm)} onOpenChange={(o) => !o && setConfirm(null)}>
+          <AlertDialogContent className="w-[calc(100vw-1.5rem)] max-w-sm rounded-2xl bg-[#080D18] border-[#1C2B44] text-white">
+            <AlertDialogHeader className="text-left">
+              <AlertDialogTitle className="text-lg font-bold text-white">
+                Delete Trip?
+              </AlertDialogTitle>
+              <AlertDialogDescription className="text-xs text-slate-400">
+                This will permanently delete this trip entry and reverse its financial impact.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter className="flex-col gap-2 sm:flex-row">
+              <AlertDialogCancel className="h-10 w-full rounded-xl sm:w-auto border-[#1C2B44] bg-[#10192A] text-slate-300">
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                className="h-10 w-full rounded-xl bg-rose-600 text-white hover:bg-rose-500 font-bold sm:w-auto"
+                onClick={() => {
+                  const id = confirm?._id;
+                  if (id) remove.mutate(id);
+                  setConfirm(null);
+                }}
+              >
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
-
-      <TripFormDialog
-        open={formOpen}
-        onOpenChange={(o) => {
-          setFormOpen(o);
-          if (!o) setFormTrip(null);
-        }}
-        trip={formTrip}
-      />
-
-      <AlertDialog open={Boolean(confirm)} onOpenChange={(o) => !o && setConfirm(null)}>
-        <AlertDialogContent className="w-[calc(100vw-1.5rem)] max-w-sm rounded-2xl">
-          <AlertDialogHeader className="text-left">
-            <AlertDialogTitle>Delete this trip?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {confirm ? `Trip of ${formatDate(confirm.date)} will be permanently removed.` : ""}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter className="flex-col gap-2 sm:flex-row">
-            <AlertDialogCancel className="h-11 w-full rounded-xl sm:w-auto">
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction
-              className="h-11 w-full rounded-xl bg-destructive text-destructive-foreground hover:bg-destructive/90 sm:w-auto"
-              onClick={() => {
-                if (confirm) remove.mutate(confirm._id);
-                setConfirm(null);
-              }}
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </AppShell>
   );
 }

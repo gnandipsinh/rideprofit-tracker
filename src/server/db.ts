@@ -24,7 +24,6 @@ import type {
   UserRecord,
   VehicleRecord,
 } from "./store";
-
 export type {
   ConsumedTokenRecord,
   DatabaseSchema,

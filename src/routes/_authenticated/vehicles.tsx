@@ -1,6 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { ArrowLeft, ChevronRight, Pencil, Plus, Power, Search, Trash2, Truck } from "lucide-react";
+import {
+  ArrowLeft,
+  ChevronRight,
+  MoreVertical,
+  Pencil,
+  Plus,
+  Power,
+  Search,
+  Trash2,
+  Truck,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  Sparkles,
+} from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { EmptyState } from "@/components/EmptyState";
 import { Button } from "@/components/ui/button";
@@ -8,7 +22,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -27,6 +40,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useApp } from "@/lib/app-context";
 import { useDeleteVehicle, useSaveVehicle, useToggleVehicleStatus, useTrips } from "@/lib/queries";
 import { VEHICLE_TYPES, type Vehicle, type VehiclePayload } from "@/lib/types";
@@ -39,13 +59,13 @@ export const Route = createFileRoute("/_authenticated/vehicles")({
   ssr: false,
   head: () => ({
     meta: [
-      { title: "Vehicles — Vehicle Calculation System" },
+      { title: "Vehicles — RideProfit Tracker" },
       {
         name: "description",
         content:
-          "Add, edit and remove vehicles. Every vehicle keeps its own trips, expenses and profit reports.",
+          "Manage fleet vehicles, monitor operating status, and inspect per-vehicle trip accounting.",
       },
-      { property: "og:title", content: "Vehicles — Vehicle Calculation System" },
+      { property: "og:title", content: "Vehicles — RideProfit Tracker" },
       {
         property: "og:description",
         content: "Manage your fleet and keep trip accounting separated per vehicle.",
@@ -106,7 +126,7 @@ function VehiclesPage() {
     try {
       await toggle.mutateAsync({ id: v._id, isActive: !v.isActive });
     } catch {
-      // toast handled in useToggleVehicleStatus onError
+      // toast handled in useToggleVehicleStatus
     }
   };
 
@@ -184,52 +204,62 @@ function VehiclesPage() {
 
   return (
     <AppShell showAddTrip={false}>
-      <div className="page-stack">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="min-w-0">
-            <h2 className="text-xl font-extrabold sm:text-2xl">Vehicles</h2>
-            <p className="text-xs text-muted-foreground">
-              {vehicles.length} vehicle(s) in your fleet
+      <div className="space-y-6">
+        {/* Header Bar with Search & "+ Add Vehicle" */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">Vehicles</h2>
+            <p className="text-xs sm:text-sm text-slate-400">
+              {vehicles.length} vehicle(s) registered in your fleet
             </p>
           </div>
-          <Button onClick={openNew} className="h-11 shrink-0 rounded-xl px-4 font-semibold">
-            <Plus className="mr-1.5 h-4 w-4" /> Add
+
+          <Button
+            onClick={openNew}
+            className="h-11 px-5 rounded-xl font-bold bg-cyan-500 text-slate-950 hover:bg-cyan-400 shadow-md shadow-cyan-500/20 tap-scale flex items-center gap-2"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Add Vehicle</span>
           </Button>
         </div>
 
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Search vehicles..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="h-12 rounded-2xl border-border/70 bg-secondary/40 pl-11 text-base placeholder:text-muted-foreground/80 focus-visible:border-primary/50 focus-visible:ring-primary/40"
-          />
+        {/* Search bar & Type Filter Pills */}
+        <div className="flex flex-col md:flex-row gap-3">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <Input
+              placeholder="Search vehicle by number, model or name..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="h-11 rounded-xl border-[#1C2B44] bg-[#10192A] pl-11 text-sm text-white placeholder:text-slate-400 focus-visible:border-cyan-500 focus-visible:ring-1 focus-visible:ring-cyan-500"
+            />
+          </div>
+
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+            {filterTabs.map((tab) => (
+              <button
+                key={tab.value}
+                type="button"
+                onClick={() => setFilterType(tab.value)}
+                className={cn(
+                  "tap-scale shrink-0 min-h-[38px] rounded-xl px-3.5 py-1.5 text-xs font-semibold transition-all",
+                  filterType === tab.value
+                    ? "bg-cyan-500 text-slate-950 font-bold shadow-md shadow-cyan-500/20"
+                    : "border border-[#1C2B44] bg-[#10192A] text-slate-400 hover:text-white hover:bg-[#132137]",
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
         </div>
 
-        <div className="-mx-0.5 flex flex-wrap gap-2 overflow-x-auto px-0.5 pb-0.5 no-scrollbar">
-          {filterTabs.map((tab) => (
-            <button
-              key={tab.value}
-              type="button"
-              onClick={() => setFilterType(tab.value)}
-              className={cn(
-                "tap-scale shrink-0 rounded-full border px-4 py-2 text-xs font-semibold transition-colors",
-                filterType === tab.value
-                  ? "border-primary/60 bg-primary/15 text-primary shadow-[0_0_18px_-8px_color-mix(in_srgb,var(--primary)_70%,transparent)]"
-                  : "border-border/70 bg-secondary/40 text-muted-foreground hover:border-primary/40 hover:text-foreground",
-              )}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
+        {/* Vehicle Grid & Details Split */}
         <div
           className={cn(
             "grid gap-4 transition-[grid-template-columns] duration-300 ease-out",
             detailVehicle
-              ? "lg:grid-cols-[minmax(0,1fr)_24rem] xl:grid-cols-[minmax(0,1fr)_26rem] 2xl:grid-cols-[minmax(0,1fr)_28rem]"
+              ? "lg:grid-cols-[minmax(0,1fr)_24rem] xl:grid-cols-[minmax(0,1fr)_26rem]"
               : "lg:grid-cols-1",
           )}
         >
@@ -237,7 +267,7 @@ function VehiclesPage() {
             {vehiclesLoading ? (
               <div className="space-y-3">
                 {Array.from({ length: 3 }).map((_, i) => (
-                  <Skeleton key={i} className="h-24 rounded-2xl" />
+                  <Skeleton key={i} className="h-24 rounded-2xl bg-[#10192A]" />
                 ))}
               </div>
             ) : filtered.length === 0 ? (
@@ -246,30 +276,30 @@ function VehiclesPage() {
                 title={search || filterType !== "all" ? "No vehicles found" : "No vehicles yet"}
                 description={
                   search || filterType !== "all"
-                    ? "Try adjusting your search or filter."
-                    : "Add a vehicle to start recording trips and profit."
+                    ? "Try adjusting your search query or vehicle type filter."
+                    : "Add your first vehicle to start recording trips and calculating real profits."
                 }
                 action={
                   !search && filterType === "all" ? (
-                    <Button onClick={openNew} className="h-11 rounded-xl px-5 font-semibold">
+                    <Button
+                      onClick={openNew}
+                      className="h-11 rounded-xl px-5 font-bold bg-cyan-500 text-slate-950 hover:bg-cyan-400"
+                    >
                       Add Vehicle
                     </Button>
                   ) : undefined
                 }
               />
             ) : (
-              <ul
-                className={cn(
-                  "grid grid-cols-1 gap-3 min-[400px]:grid-cols-2",
-                  !detailVehicle && "min-[1100px]:grid-cols-3",
-                )}
-              >
-                {filtered.map((v) => (
-                  <li key={v._id}>
+              <div className="space-y-3">
+                {filtered.map((v) => {
+                  const isSelected = detailVehicle?._id === v._id;
+                  return (
                     <div
+                      key={v._id}
                       role="button"
                       tabIndex={0}
-                      aria-pressed={detailVehicle?._id === v._id}
+                      aria-pressed={isSelected}
                       onClick={() => openDetails(v._id)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
@@ -278,88 +308,118 @@ function VehiclesPage() {
                         }
                       }}
                       className={cn(
-                        "glass-card glass-card-hover w-full cursor-pointer rounded-2xl p-4 transition-all duration-200",
-                        detailVehicle?._id === v._id
-                          ? "border-primary/70 bg-primary/[0.06] shadow-[0_0_0_1px_color-mix(in_srgb,var(--primary)_35%,transparent),0_12px_40px_-24px_color-mix(in_srgb,var(--primary)_55%,transparent)]"
-                          : "hover:border-cyan-400/40",
+                        "rounded-2xl border p-3.5 sm:p-4.5 transition-all duration-150 cursor-pointer text-left flex items-center justify-between gap-3 sm:gap-4",
+                        isSelected
+                          ? "border-cyan-500 bg-[#13223A] shadow-lg shadow-cyan-500/10"
+                          : "border-[#1C2B44] bg-[#10192A] hover:border-cyan-500/40 hover:bg-[#132137]",
                       )}
                     >
-                      <div className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 text-left">
-                        <div className="grid h-14 w-14 place-items-center rounded-2xl bg-background/55 text-primary ring-1 ring-border/80">
-                          <Truck className="h-7 w-7" />
+                      {/* Left: Truck thumbnail image / icon */}
+                      <div className="flex items-center gap-3.5 min-w-0">
+                        <div className="relative h-14 w-16 sm:h-16 sm:w-20 shrink-0 rounded-xl overflow-hidden border border-[#1C2B44] bg-[#080D18] flex items-center justify-center">
+                          <img
+                            src="/assets/landing/hero-truck.png"
+                            alt="Truck thumbnail"
+                            className="h-full w-full object-cover opacity-90 transition-transform duration-200 hover:scale-105"
+                            referrerPolicy="no-referrer"
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent pointer-events-none" />
                         </div>
+
+                        {/* Middle: Details */}
                         <div className="min-w-0">
-                          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                            <p className="min-w-0 max-w-full truncate text-sm font-extrabold sm:text-base">
-                              {v.vehicleNumber || v.name}
-                            </p>
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-sm sm:text-base font-bold text-white truncate">
+                              {v.name}
+                            </h3>
                             <span
                               className={cn(
-                                "shrink-0 rounded-full px-2 py-0.5 text-[0.65rem] font-bold",
+                                "shrink-0 rounded-md px-2 py-0.5 text-[0.65rem] font-bold uppercase tracking-wider",
                                 v.isActive
-                                  ? "bg-success/15 text-success"
-                                  : "bg-muted text-muted-foreground",
+                                  ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30"
+                                  : "bg-rose-500/15 text-rose-400 border border-rose-500/30",
                               )}
                             >
                               {v.isActive ? "Active" : "Inactive"}
                             </span>
                           </div>
-                          <p className="mt-1 truncate text-xs text-muted-foreground">
-                            {[v.name, v.type, v.model].filter(Boolean).join(" · ") || "No details"}
-                          </p>
+
+                          <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-xs text-slate-400">
+                            <span className="font-mono font-bold text-cyan-400 uppercase tracking-wider">
+                              {v.vehicleNumber || "No plate"}
+                            </span>
+                            <span>·</span>
+                            <span>{v.type}</span>
+                            {v.model ? (
+                              <>
+                                <span>·</span>
+                                <span>{v.model}</span>
+                              </>
+                            ) : null}
+                          </div>
                         </div>
-                        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                       </div>
+
+                      {/* Right: Actions menu */}
                       <div
-                        className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-border/50 pt-3"
+                        className="flex items-center gap-2 shrink-0"
                         onClick={(e) => e.stopPropagation()}
                       >
-                        <Badge variant="default" className="min-w-0 max-w-full truncate">
-                          {v.type}
-                        </Badge>
-                        <div className="ml-auto flex shrink-0 gap-1">
-                          <Button
-                            variant="ghost"
-                            size="iconSm"
-                            aria-label={`Toggle ${v.name} status`}
-                            className="rounded-xl text-success hover:bg-success/10"
-                            onClick={() => toggleActive(v)}
-                            disabled={toggle.isPending}
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-9 w-9 rounded-xl text-slate-400 hover:text-white hover:bg-[#172844] border border-transparent hover:border-[#1C2B44]"
+                              aria-label="Vehicle actions"
+                            >
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent
+                            align="end"
+                            className="w-44 rounded-xl border-[#1C2B44] bg-[#080D18] text-slate-200"
                           >
-                            <Power className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="iconSm"
-                            aria-label={`Edit ${v.name}`}
-                            className="rounded-xl text-primary hover:bg-primary/10"
-                            onClick={() => openEdit(v)}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="iconSm"
-                            aria-label={`Delete ${v.name}`}
-                            className="rounded-xl text-destructive hover:bg-destructive/10"
-                            onClick={() => {
-                              setMobileDetailsOpen(false);
-                              setConfirm(v);
-                            }}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
+                            <DropdownMenuItem
+                              onClick={() => toggleActive(v)}
+                              className="cursor-pointer text-xs"
+                            >
+                              <Power className="h-3.5 w-3.5 mr-2 text-cyan-400" />
+                              <span>{v.isActive ? "Set Inactive" : "Set Active"}</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => openEdit(v)}
+                              className="cursor-pointer text-xs"
+                            >
+                              <Pencil className="h-3.5 w-3.5 mr-2 text-cyan-400" />
+                              <span>Edit Details</span>
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator className="bg-[#1C2B44]" />
+                            <DropdownMenuItem
+                              onClick={() => {
+                                setMobileDetailsOpen(false);
+                                setConfirm(v);
+                              }}
+                              className="cursor-pointer text-xs text-rose-400 focus:text-rose-400"
+                            >
+                              <Trash2 className="h-3.5 w-3.5 mr-2" />
+                              <span>Delete Vehicle</span>
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+
+                        <ChevronRight className="hidden sm:block h-4 w-4 text-slate-500" />
                       </div>
                     </div>
-                  </li>
-                ))}
-              </ul>
+                  );
+                })}
+              </div>
             )}
           </div>
 
+          {/* Desktop Right Panel for Selected Vehicle */}
           {detailVehicle ? (
-            <div className="details-panel-enter hidden lg:block">
+            <div className="hidden lg:block">
               <VehicleDetailsCard
                 vehicle={detailVehicle}
                 totals={detailTotals}
@@ -377,37 +437,38 @@ function VehiclesPage() {
         </div>
       </div>
 
+      {/* Mobile Details Modal Sheet */}
       {detailVehicle && mobileDetailsOpen ? (
-        <div className="fixed inset-0 z-50 flex flex-col bg-background lg:hidden">
-          <div className="flex shrink-0 items-center gap-2 border-b border-border/60 bg-card/95 px-3 py-3 backdrop-blur">
-            <button
-              type="button"
-              onClick={clearSelection}
-              className="tap-scale grid h-10 w-10 place-items-center rounded-xl border border-border/70 bg-secondary/50 text-foreground"
-              aria-label="Back to vehicles"
-            >
-              <ArrowLeft className="h-5 w-5" />
-            </button>
-            <div className="min-w-0 flex-1">
-              <p className="text-[0.65rem] font-bold uppercase tracking-[0.18em] text-primary">
-                Vehicle Details
-              </p>
-              <p className="break-words text-sm font-extrabold">
-                {detailVehicle.vehicleNumber || detailVehicle.name}
-              </p>
+        <div className="fixed inset-0 z-50 flex flex-col bg-[#0B111E] lg:hidden">
+          <div className="flex shrink-0 items-center justify-between border-b border-[#1C2B44] bg-[#080D18] px-4 py-3">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={clearSelection}
+                className="grid h-9 w-9 place-items-center rounded-xl border border-[#1C2B44] bg-[#10192A] text-slate-200"
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </button>
+              <div>
+                <p className="text-[0.65rem] font-bold uppercase tracking-wider text-cyan-400">
+                  Vehicle Details
+                </p>
+                <p className="text-sm font-bold text-white truncate">
+                  {detailVehicle.vehicleNumber || detailVehicle.name}
+                </p>
+              </div>
             </div>
+
             <button
               type="button"
               onClick={clearSelection}
-              className="tap-scale grid h-10 w-10 place-items-center rounded-xl border border-border/70 bg-secondary/50 text-muted-foreground"
-              aria-label="Close vehicle details"
+              className="text-xs font-bold text-slate-400 hover:text-white"
             >
-              <span aria-hidden className="text-lg leading-none">
-                ×
-              </span>
+              Done
             </button>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 pb-8">
+
+          <div className="flex-1 overflow-y-auto p-4 pb-12">
             <VehicleDetailsCard
               vehicle={detailVehicle}
               totals={detailTotals}
@@ -423,18 +484,19 @@ function VehiclesPage() {
         </div>
       ) : null}
 
+      {/* Add / Edit Vehicle Modal Dialog */}
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[92vh] w-[calc(100vw-1.5rem)] max-w-lg overflow-y-auto rounded-3xl p-4 sm:p-6">
+        <DialogContent className="max-h-[92vh] w-[calc(100vw-1.5rem)] max-w-lg overflow-y-auto rounded-3xl p-5 sm:p-6 bg-[#080D18] border-[#1C2B44] text-white">
           <DialogHeader className="text-left">
-            <DialogTitle className="text-xl font-extrabold">
+            <DialogTitle className="text-xl font-black text-white">
               {editing ? "Edit Vehicle" : "Add Vehicle"}
             </DialogTitle>
-            <DialogDescription className="text-xs">
-              Trips and reports stay separated per vehicle.
+            <DialogDescription className="text-xs text-slate-400">
+              Trip logs, fuel records, and profit calculations stay isolated per vehicle.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4">
+          <div className="space-y-4 py-2">
             <Field label="Vehicle Type" id="v-type">
               <div className="flex flex-wrap gap-2 pb-1">
                 {VEHICLE_TYPES.map((t) => (
@@ -443,10 +505,10 @@ function VehiclesPage() {
                     type="button"
                     onClick={() => setForm((f) => ({ ...f, type: t }))}
                     className={cn(
-                      "tap-scale shrink-0 rounded-full border px-4 py-2 text-xs font-semibold transition-all",
+                      "tap-scale shrink-0 rounded-xl border px-3.5 py-1.5 text-xs font-semibold transition-all",
                       form.type === t
-                        ? "border-primary bg-primary/15 text-primary"
-                        : "border-border bg-secondary/60 text-muted-foreground hover:border-primary/50",
+                        ? "border-cyan-500 bg-cyan-500 text-slate-950 font-bold"
+                        : "border-[#1C2B44] bg-[#10192A] text-slate-400 hover:border-cyan-500/40",
                     )}
                   >
                     {t}
@@ -454,42 +516,46 @@ function VehiclesPage() {
                 ))}
               </div>
             </Field>
-            <Field label="Vehicle Number" id="v-number">
+
+            <Field label="Vehicle Number / Plate" id="v-number">
               <Input
                 id="v-number"
                 value={form.vehicleNumber}
                 onChange={(e) =>
                   setForm((f) => ({ ...f, vehicleNumber: e.target.value.toUpperCase() }))
                 }
-                placeholder="e.g. GJ04AX9209"
-                className="h-12 rounded-xl bg-secondary/60 text-base uppercase"
+                placeholder="e.g. GJ04 AB 1234"
+                className="h-11 rounded-xl bg-[#10192A] border-[#1C2B44] text-sm text-white uppercase placeholder:text-slate-400 font-mono font-bold"
               />
             </Field>
-            <Field label="Vehicle Name" id="v-name">
+
+            <Field label="Vehicle Name / Model" id="v-name">
               <Input
                 id="v-name"
                 value={form.name}
                 onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                placeholder="Eicher 1109"
-                className="h-12 rounded-xl bg-secondary/60 text-base"
+                placeholder="e.g. Eicher Pro 2114"
+                className="h-11 rounded-xl bg-[#10192A] border-[#1C2B44] text-sm text-white placeholder:text-slate-400"
               />
             </Field>
-            <Field label="Model" id="v-model">
+
+            <Field label="Manufacturing Year / Model" id="v-model">
               <Input
                 id="v-model"
                 value={form.model}
                 onChange={(e) => setForm((f) => ({ ...f, model: e.target.value }))}
-                placeholder="2021"
-                className="h-12 rounded-xl bg-secondary/60 text-base"
+                placeholder="e.g. 2024"
+                className="h-11 rounded-xl bg-[#10192A] border-[#1C2B44] text-sm text-white placeholder:text-slate-400"
               />
             </Field>
-            <Field label="Notes" id="v-notes">
+
+            <Field label="Operating Notes / Route / Driver" id="v-notes">
               <Textarea
                 id="v-notes"
                 value={form.notes}
                 onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-                placeholder="Driver name, route, EMI details…"
-                className="min-h-20 rounded-xl bg-secondary/60 text-base"
+                placeholder="Driver details, regular routes, EMI terms..."
+                className="min-h-20 rounded-xl bg-[#10192A] border-[#1C2B44] text-sm text-white placeholder:text-slate-400"
               />
             </Field>
           </div>
@@ -497,40 +563,43 @@ function VehiclesPage() {
           <DialogFooter className="mt-4 flex-col gap-2 sm:flex-row">
             <Button
               variant="outline"
-              className="h-12 w-full rounded-xl sm:w-auto"
+              className="h-11 w-full rounded-xl sm:w-auto border-[#1C2B44] bg-[#10192A] text-slate-300 hover:bg-[#172844] hover:text-white"
               onClick={() => setOpen(false)}
               disabled={save.isPending}
             >
               Cancel
             </Button>
             <Button
-              className="h-12 w-full rounded-xl font-bold sm:w-auto"
+              className="h-11 w-full rounded-xl font-bold sm:w-auto bg-cyan-500 text-slate-950 hover:bg-cyan-400"
               onClick={submit}
               disabled={save.isPending}
             >
               {save.isPending ? (
                 <span className="mr-1.5 inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
               ) : null}
-              {editing ? "Save changes" : "Save Vehicle"}
+              {editing ? "Save Changes" : "Save Vehicle"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
+      {/* Delete Confirmation Alert */}
       <AlertDialog open={Boolean(confirm)} onOpenChange={(o) => !o && setConfirm(null)}>
-        <AlertDialogContent className="w-[calc(100vw-1.5rem)] max-w-sm rounded-2xl">
+        <AlertDialogContent className="w-[calc(100vw-1.5rem)] max-w-sm rounded-2xl bg-[#080D18] border-[#1C2B44] text-white">
           <AlertDialogHeader className="text-left">
-            <AlertDialogTitle>Delete {confirm?.name}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This permanently deletes the vehicle and every trip recorded for it.
+            <AlertDialogTitle className="text-lg font-bold text-white">
+              Delete {confirm?.name}?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-xs text-slate-400">
+              This will permanently delete this vehicle and all associated trip accounting records.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="flex-col gap-2 sm:flex-row">
-            <AlertDialogCancel className="h-11 w-full rounded-xl sm:w-auto">
+            <AlertDialogCancel className="h-10 w-full rounded-xl sm:w-auto border-[#1C2B44] bg-[#10192A] text-slate-300">
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction
-              className="h-11 w-full rounded-xl bg-destructive text-destructive-foreground hover:bg-destructive/90 sm:w-auto"
+              className="h-10 w-full rounded-xl bg-rose-600 text-white hover:bg-rose-500 font-bold sm:w-auto"
               onClick={() => {
                 const id = confirm?._id;
                 if (id) {
@@ -557,7 +626,7 @@ function Field({ label, id, children }: { label: string; id?: string; children: 
     <div className="min-w-0">
       <Label
         htmlFor={id}
-        className="mb-1.5 block text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground"
+        className="mb-1.5 block text-xs font-semibold text-slate-400 uppercase tracking-wider"
       >
         {label}
       </Label>
@@ -590,17 +659,19 @@ function VehicleDetailsCard({
   const { symbol } = useApp();
   const rows: Array<[string, React.ReactNode]> = [
     ["Vehicle type", vehicle.type],
-    ["Vehicle number", vehicle.vehicleNumber || "Not added"],
-    ["Vehicle name", vehicle.name],
-    ["Model", vehicle.model || "Not added"],
-    ["Added on", formatDateShort(vehicle.createdAt)],
+    ["Plate Number", vehicle.vehicleNumber || "Not specified"],
+    ["Vehicle Name", vehicle.name],
+    ["Model / Year", vehicle.model || "Not specified"],
+    ["Registered", formatDateShort(vehicle.createdAt)],
     [
       "Status",
       <span
         key="status"
         className={cn(
-          "inline-flex rounded-full px-2 py-0.5 text-[0.65rem] font-bold",
-          vehicle.isActive ? "bg-success/15 text-success" : "bg-muted text-muted-foreground",
+          "inline-flex rounded-md px-2 py-0.5 text-[0.65rem] font-bold uppercase",
+          vehicle.isActive
+            ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30"
+            : "bg-rose-500/15 text-rose-400 border border-rose-500/30",
         )}
       >
         {vehicle.isActive ? "Active" : "Inactive"}
@@ -611,141 +682,116 @@ function VehicleDetailsCard({
   return (
     <aside
       className={cn(
-        "fleet-panel min-w-0 rounded-3xl p-4 sm:p-5",
+        "rounded-2xl border border-[#1C2B44] bg-[#10192A] p-5",
         sticky && "lg:sticky lg:top-24 lg:h-fit",
       )}
     >
       {hideHeader ? null : (
-        <div className="flex min-w-0 items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <p className="text-[0.65rem] font-bold uppercase tracking-[0.2em] text-primary">
-              Vehicle Details
-            </p>
-            <h3 className="mt-1 break-words text-xl font-extrabold leading-tight">
-              {vehicle.vehicleNumber || vehicle.name}
-            </h3>
-            <p className="mt-0.5 break-words text-sm text-muted-foreground">{vehicle.name}</p>
+        <div className="flex items-start justify-between gap-3 pb-4 border-b border-[#1C2B44]">
+          <div className="min-w-0">
+            <span className="text-[0.65rem] font-bold uppercase tracking-wider text-cyan-400 block">
+              Vehicle Overview
+            </span>
+            <h3 className="mt-1 text-lg font-black text-white truncate">{vehicle.name}</h3>
+            <p className="text-xs font-mono font-bold text-cyan-400">{vehicle.vehicleNumber}</p>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
-            <div className="grid h-12 w-12 place-items-center rounded-2xl bg-primary/15 text-primary ring-1 ring-primary/30">
-              <Truck className="h-6 w-6" />
-            </div>
-            {onClose ? (
-              <button
-                type="button"
-                onClick={onClose}
-                aria-label="Close vehicle details"
-                className="tap-scale grid h-9 w-9 place-items-center rounded-xl border border-border/70 bg-secondary/50 text-muted-foreground hover:text-foreground"
-              >
-                <span aria-hidden className="text-lg leading-none">
-                  ×
-                </span>
-              </button>
-            ) : null}
-          </div>
+          {onClose ? (
+            <button
+              type="button"
+              onClick={onClose}
+              className="text-slate-400 hover:text-white text-lg font-bold p-1"
+            >
+              ×
+            </button>
+          ) : null}
         </div>
       )}
 
-      <div className="mt-4 divide-y divide-border/55 overflow-hidden rounded-2xl border border-border/65 bg-background/30 px-3">
+      {/* Specifications */}
+      <div className="mt-4 divide-y divide-[#1C2B44]/60 rounded-xl border border-[#1C2B44] bg-[#080D18]/70 px-3">
         {rows.map(([label, value]) => (
-          <div
-            key={label}
-            className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1 py-2.5 text-xs"
-          >
-            <span className="shrink-0 text-muted-foreground">{label}</span>
-            <span className="min-w-0 flex-1 break-words text-right font-semibold text-foreground">
-              {value}
-            </span>
+          <div key={label} className="flex items-center justify-between py-2 text-xs">
+            <span className="text-slate-400">{label}</span>
+            <span className="font-semibold text-white">{value}</span>
           </div>
         ))}
       </div>
 
+      {/* Performance KPIs for this vehicle */}
       <div className="mt-4 grid grid-cols-2 gap-2">
-        <DetailMetric
-          label="Total trips"
-          value={tripsLoading ? "..." : totalsUnavailable ? "—" : String(totals.trips)}
-        />
-        <DetailMetric
-          label="Net profit"
-          value={
-            tripsLoading ? "..." : totalsUnavailable ? "—" : formatMoney(totals.profit, symbol)
-          }
-          tone={totalsUnavailable ? "default" : totals.profit >= 0 ? "success" : "danger"}
-        />
-        <DetailMetric
-          label="Total income"
-          value={
-            tripsLoading ? "..." : totalsUnavailable ? "—" : formatMoney(totals.income, symbol)
-          }
-          tone={totalsUnavailable ? "default" : "success"}
-        />
-        <DetailMetric
-          label="Total expense"
-          value={
-            tripsLoading
+        <div className="rounded-xl border border-[#1C2B44] bg-[#080D18]/70 p-3">
+          <p className="text-[0.65rem] font-bold uppercase tracking-wider text-slate-400">
+            Total Trips
+          </p>
+          <p className="text-base font-black text-white tabular-nums mt-1">
+            {tripsLoading ? "..." : totalsUnavailable ? "—" : totals.trips}
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-[#1C2B44] bg-[#080D18]/70 p-3">
+          <p className="text-[0.65rem] font-bold uppercase tracking-wider text-slate-400">
+            Net Profit
+          </p>
+          <p
+            className={cn(
+              "text-base font-black tabular-nums mt-1",
+              totalsUnavailable
+                ? "text-white"
+                : totals.profit >= 0
+                  ? "text-emerald-400"
+                  : "text-rose-400",
+            )}
+          >
+            {tripsLoading ? "..." : totalsUnavailable ? "—" : formatMoney(totals.profit, symbol)}
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-[#1C2B44] bg-[#080D18]/70 p-3">
+          <p className="text-[0.65rem] font-bold uppercase tracking-wider text-slate-400">Income</p>
+          <p className="text-base font-black text-white tabular-nums mt-1">
+            {tripsLoading ? "..." : totalsUnavailable ? "—" : formatMoney(totals.income, symbol)}
+          </p>
+        </div>
+
+        <div className="rounded-xl border border-[#1C2B44] bg-[#080D18]/70 p-3">
+          <p className="text-[0.65rem] font-bold uppercase tracking-wider text-slate-400">
+            Expenses
+          </p>
+          <p className="text-base font-black text-rose-400 tabular-nums mt-1">
+            {tripsLoading
               ? "..."
               : totalsUnavailable
                 ? "—"
-                : formatMoney(totals.totalExpense, symbol)
-          }
-          tone={totalsUnavailable ? "default" : "danger"}
-        />
+                : formatMoney(totals.totalExpense, symbol)}
+          </p>
+        </div>
       </div>
-      {totalsUnavailable ? (
-        <p className="mt-3 text-xs font-medium text-destructive">
-          Trip totals could not be loaded. Try again shortly.
-        </p>
-      ) : null}
 
       {vehicle.notes ? (
-        <div className="mt-4 rounded-2xl border border-border/65 bg-background/25 p-3">
-          <p className="text-[0.65rem] font-bold uppercase tracking-[0.16em] text-muted-foreground">
-            Notes
-          </p>
-          <p className="mt-1.5 text-sm leading-relaxed text-foreground/80">{vehicle.notes}</p>
+        <div className="mt-4 rounded-xl border border-[#1C2B44] bg-[#080D18]/70 p-3 text-xs">
+          <p className="font-bold text-slate-400 uppercase tracking-wider text-[0.65rem]">Notes</p>
+          <p className="mt-1 text-slate-300 leading-relaxed">{vehicle.notes}</p>
         </div>
       ) : null}
 
       <div className="mt-4 grid grid-cols-2 gap-2">
-        <Button variant="outline" onClick={onEdit} className="h-11 rounded-xl">
-          <Pencil className="mr-1.5 h-4 w-4" /> Edit
+        <Button
+          variant="outline"
+          onClick={onEdit}
+          className="h-10 rounded-xl border-[#1C2B44] bg-[#080D18] text-slate-300 hover:text-white"
+        >
+          <Pencil className="mr-1.5 h-3.5 w-3.5 text-cyan-400" />
+          Edit
         </Button>
-        <Button variant="destructive" onClick={onDelete} className="h-11 rounded-xl">
-          <Trash2 className="mr-1.5 h-4 w-4" /> Delete
+        <Button
+          variant="destructive"
+          onClick={onDelete}
+          className="h-10 rounded-xl bg-rose-600/20 text-rose-400 border border-rose-500/30 hover:bg-rose-600 hover:text-white"
+        >
+          <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+          Delete
         </Button>
       </div>
-      {onClose && sticky ? (
-        <Button variant="ghost" onClick={onClose} className="mt-2 h-10 w-full rounded-xl">
-          Close details
-        </Button>
-      ) : null}
     </aside>
-  );
-}
-
-function DetailMetric({
-  label,
-  value,
-  tone = "default",
-}: {
-  label: string;
-  value: string;
-  tone?: "default" | "success" | "danger";
-}) {
-  return (
-    <div className="min-w-0 rounded-2xl border border-border/65 bg-background/30 p-3">
-      <p className="text-[0.6rem] font-bold uppercase tracking-[0.14em] text-muted-foreground">
-        {label}
-      </p>
-      <p
-        className={cn(
-          "mt-1 break-words text-sm font-extrabold tabular-nums sm:text-base",
-          tone === "success" && "text-success",
-          tone === "danger" && "text-destructive",
-        )}
-      >
-        {value}
-      </p>
-    </div>
   );
 }

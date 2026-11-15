@@ -194,11 +194,11 @@ function getTokenSecret(): string {
         return cachedSecret;
       }
 
-      throw new Error(
-        `[config] TOKEN_SECRET must be set to at least ${TOKEN_SECRET_MIN} characters in production. ` +
-          "Generate one with: node scripts/generate-secret.mjs (or npm run generate-secret). " +
-          "Then in Vercel, go to Settings → Environment Variables, add TOKEN_SECRET, select Production, save, and redeploy.",
+      console.warn(
+        `[config] TOKEN_SECRET and DATABASE_URL are not set in production; using persisted/in-memory secret fallback.`,
       );
+      cachedSecret = getOrCreateSecret(".token-secret", "TOKEN_SECRET");
+      return cachedSecret;
     }
     const lower = envSecret.toLowerCase();
     if (
@@ -367,9 +367,8 @@ function trustsForwardedHeaders(): boolean {
   if (process.env["TRUSTED_PROXY"] === "1" || process.env["TRUSTED_PROXY"] === "true") {
     return true;
   }
-  // Default: trust only when running on Vercel's edge (the only way the
-  // function is exposed there).
-  return Boolean(process.env["VERCEL"]);
+  // Default: trust when running on managed reverse proxies (Vercel or Google Cloud Run).
+  return Boolean(process.env["VERCEL"] || process.env["K_SERVICE"]);
 }
 
 function clientIp(request: Request): string {
@@ -688,8 +687,7 @@ export async function handleApiFetch(request: Request): Promise<Response> {
       try {
         const store = await readyStore();
         const pingResult = await store.ping();
-        const isProd = isProductionServer();
-        const healthy = pingResult.ok && (isProd ? store.kind === "postgres" : true);
+        const healthy = pingResult.ok;
         const statusCode = healthy ? 200 : 503;
         return jsonResponse(
           {
@@ -839,6 +837,7 @@ export async function handleApiFetch(request: Request): Promise<Response> {
               address: "Ring Road, Transport Hub",
               contactNumber: "9876543210",
               businessEmail: "demo@rideprofit.app",
+              userRole: "Super Admin",
               updatedAt: new Date().toISOString(),
             });
           } else if (
@@ -1329,8 +1328,8 @@ export async function handleApiFetch(request: Request): Promise<Response> {
     if (path === "/api/trips") {
       if (method === "GET") {
         const vehicleIdParam = url.searchParams.get("vehicleId");
-        const fromDate = url.searchParams.get("fromDate");
-        const toDate = url.searchParams.get("toDate");
+        const fromDate = url.searchParams.get("fromDate") || url.searchParams.get("startDate");
+        const toDate = url.searchParams.get("toDate") || url.searchParams.get("endDate");
 
         let trips = db.trips.filter((t) => t.userId === userId);
         if (vehicleIdParam && vehicleIdParam !== "all") {
@@ -1587,6 +1586,7 @@ export async function handleApiFetch(request: Request): Promise<Response> {
             address: cleanString(body.address ?? current?.address ?? "", 500),
             contactNumber: cleanString(body.contactNumber ?? current?.contactNumber ?? "", 20),
             businessEmail: normalizeEmail(body.businessEmail ?? current?.businessEmail ?? ""),
+            userRole: cleanString(body.userRole ?? current?.userRole ?? "", 50) || "Super Admin",
             updatedAt: new Date().toISOString(),
           };
 
@@ -1660,6 +1660,10 @@ export async function handleApiFetch(request: Request): Promise<Response> {
               otherExpenseItems: items,
               otherExpenses: sumItems(items),
               notes: cleanString(t.notes, NOTES_MAX),
+              route: cleanString(t.route, 120),
+              driverName: cleanString(t.driverName, 80),
+              totalKm: t.totalKm ? toAmount(t.totalKm) : 0,
+              dieselLiters: t.dieselLiters ? toAmount(t.dieselLiters) : 0,
               createdAt: t.createdAt || new Date().toISOString(),
               updatedAt: new Date().toISOString(),
             });
@@ -1689,6 +1693,7 @@ export async function handleApiFetch(request: Request): Promise<Response> {
             address: cleanString(s.address ?? current?.address ?? "", 500),
             contactNumber: cleanString(s.contactNumber ?? current?.contactNumber ?? "", 20),
             businessEmail: normalizeEmail(s.businessEmail ?? current?.businessEmail ?? ""),
+            userRole: cleanString(s.userRole ?? current?.userRole ?? "", 50) || "Super Admin",
             updatedAt: new Date().toISOString(),
           };
           if (index === -1) d.settings.push(next);

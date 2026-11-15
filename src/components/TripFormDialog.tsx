@@ -202,17 +202,17 @@ export function TripFormDialog({ open, onOpenChange, trip }: TripFormDialogProps
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92vh] w-[calc(100vw-1.5rem)] max-w-2xl overflow-y-auto rounded-3xl p-4 sm:p-6">
+      <DialogContent className="max-h-[92vh] w-[calc(100vw-1.5rem)] max-w-2xl overflow-y-auto rounded-3xl p-5 sm:p-6 bg-[#080D18] border-[#1C2B44] text-white">
         <DialogHeader className="text-left">
-          <DialogTitle className="text-xl font-extrabold flex items-center justify-between">
+          <DialogTitle className="text-xl font-black text-white flex items-center justify-between">
             <span>{trip ? "Edit Trip" : "Add Trip"}</span>
             {mileage ? (
-              <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-cyan-300">
+              <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-cyan-500/15 border border-cyan-500/30 text-cyan-300">
                 ⚡ {mileage} km/L
               </span>
             ) : null}
           </DialogTitle>
-          <DialogDescription className="text-xs">
+          <DialogDescription className="text-xs text-slate-400">
             Totals, expenses and profit are calculated automatically.
           </DialogDescription>
         </DialogHeader>
@@ -508,13 +508,13 @@ export function TripFormDialog({ open, onOpenChange, trip }: TripFormDialogProps
         <DialogFooter className="mt-4 flex-col gap-2 sm:flex-row">
           <Button
             variant="outline"
-            className="h-11 w-full rounded-xl sm:w-auto"
+            className="h-11 w-full rounded-xl sm:w-auto border-[#1C2B44] bg-[#10192A] text-slate-300 hover:bg-[#172844] hover:text-white"
             onClick={() => onOpenChange(false)}
           >
             Cancel
           </Button>
           <Button
-            className="h-11 w-full rounded-xl font-bold bg-gradient-to-r from-cyan-500 to-blue-600 text-white hover:from-cyan-400 hover:to-blue-500 sm:w-auto"
+            className="h-11 w-full rounded-xl font-bold bg-cyan-500 text-slate-950 hover:bg-cyan-400 sm:w-auto"
             onClick={submit}
             disabled={saveTrip.isPending}
           >

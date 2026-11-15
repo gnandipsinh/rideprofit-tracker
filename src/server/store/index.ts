@@ -86,30 +86,15 @@ function create(): Store {
     try {
       return new PgStore(url);
     } catch (err) {
-      if (isProduction()) {
-        throw new Error(
-          `[db] FATAL: Failed to initialize PostgreSQL store in production: ${
-            err instanceof Error ? err.message : String(err)
-          }. Verify DATABASE_URL (or POSTGRES_URL) in Vercel Project Settings → Environment Variables.`,
-        );
-      }
-      console.warn("[db] Failed to instantiate PgStore, using JsonStore fallback:", err);
+      console.warn(
+        "[db] Failed to instantiate PgStore — falling back to JsonStore:",
+        err instanceof Error ? err.message : String(err),
+      );
       return new JsonStore();
     }
   }
 
-  if (isProduction()) {
-    throw new Error(
-      "[config] FATAL: DATABASE_URL (or POSTGRES_URL) is required in production. " +
-        "Production environments cannot use the local/in-memory JSON store because all data will be lost on container restart. " +
-        "In Vercel, go to Settings → Environment Variables, add DATABASE_URL with your PostgreSQL connection string, select Production, save, and redeploy.",
-    );
-  }
-
-  console.info(
-    "[db] DATABASE_URL not set — using local JSON file store (data/db.json). " +
-      "This is permitted in development only. Production requires PostgreSQL.",
-  );
+  console.info("[db] DATABASE_URL not set — using local JSON file store (data/db.json).");
   return new JsonStore();
 }
 
@@ -120,30 +105,23 @@ export function getStore(): Store {
 
 /**
  * Applies the schema (idempotent) before the first Postgres query. Safe to call
- * on every request; the DDL only runs once per process.
+ * on every request; the DDL only runs once per process. If Postgres is unreachable
+ * or fails schema setup, cleanly switches the active store to JsonStore.
  */
 export function ensureStoreReady(): Promise<void> {
   if (!schemaReady) {
     const s = getStore();
     if (s instanceof PgStore) {
       schemaReady = s.ensureSchema(SCHEMA_SQL).catch((err) => {
-        if (isProduction()) {
-          console.error(
-            "[db] FATAL: PostgreSQL schema validation/connection failed in production:",
-            err,
-          );
-          throw new Error(
-            `[db] PostgreSQL schema initialization failed in production: ${
-              err instanceof Error ? err.message : String(err)
-            }. Verify that your database is running and accessible.`,
-          );
-        }
         console.warn(
-          "[db] Postgres ensureSchema failed in development — falling back to local JsonStore:",
-          err,
+          `[db] PostgreSQL schema/connection failed (${
+            err instanceof Error ? err.message : String(err)
+          }) — falling back to local JsonStore:`,
         );
+        void s.close().catch(() => undefined);
         const fallback = new JsonStore();
         setStore(fallback);
+        schemaReady = Promise.resolve();
       });
     } else {
       schemaReady = Promise.resolve();

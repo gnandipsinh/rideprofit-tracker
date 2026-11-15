@@ -58,9 +58,18 @@ CREATE TABLE IF NOT EXISTS rideprofit.trips (
   other_expense_items JSONB NOT NULL DEFAULT '[]'::jsonb,
   other_expenses      NUMERIC NOT NULL DEFAULT 0,
   notes               TEXT NOT NULL DEFAULT '',
+  route               TEXT NOT NULL DEFAULT '',
+  driver_name         TEXT NOT NULL DEFAULT '',
+  total_km            NUMERIC NOT NULL DEFAULT 0,
+  diesel_liters       NUMERIC NOT NULL DEFAULT 0,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE rideprofit.trips ADD COLUMN IF NOT EXISTS route TEXT NOT NULL DEFAULT '';
+ALTER TABLE rideprofit.trips ADD COLUMN IF NOT EXISTS driver_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE rideprofit.trips ADD COLUMN IF NOT EXISTS total_km NUMERIC NOT NULL DEFAULT 0;
+ALTER TABLE rideprofit.trips ADD COLUMN IF NOT EXISTS diesel_liters NUMERIC NOT NULL DEFAULT 0;
 
 DO $$
 BEGIN
@@ -90,9 +99,11 @@ CREATE TABLE IF NOT EXISTS rideprofit.settings (
   address             TEXT NOT NULL DEFAULT '',
   contact_number      TEXT NOT NULL DEFAULT '',
   business_email      TEXT NOT NULL DEFAULT '',
+  user_role           TEXT NOT NULL DEFAULT 'Super Admin',
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS settings_user_id_idx ON rideprofit.settings (user_id);
+ALTER TABLE rideprofit.settings ADD COLUMN IF NOT EXISTS user_role TEXT NOT NULL DEFAULT 'Super Admin';
 
 CREATE TABLE IF NOT EXISTS rideprofit.pending_codes (
   token      TEXT NOT NULL,

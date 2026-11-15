@@ -113,11 +113,13 @@ export const api = {
       const res = await fetch(endpoint, { signal: AbortSignal.timeout(4000) });
       if (res.ok) {
         const json = await res.json();
-        return {
-          status: "connected",
-          database: json?.data?.database || "persistent-database",
-          url: baseUrl || (typeof window !== "undefined" ? window.location?.origin : ""),
-        };
+        if (json?.success !== false) {
+          return {
+            status: "connected",
+            database: json?.database || json?.data?.database || "persistent-database",
+            url: baseUrl || (typeof window !== "undefined" ? window.location?.origin : ""),
+          };
+        }
       }
     } catch {
       /* fall through */
@@ -365,6 +367,7 @@ export const api = {
     address: string;
     contactNumber: string;
     businessEmail: string;
+    userRole?: string;
   }): Promise<AppSettings> => {
     const user = await getAuthenticatedUser();
     if (!user) throw new ApiError("Authentication required", 401);
@@ -385,6 +388,7 @@ export const api = {
         currency: payload.currency || "INR",
         defaultVehicleId: payload.defaultVehicleId,
         fullName: sanitizeString(payload.fullName),
+        userRole: sanitizeString(payload.userRole || ""),
         mobileNumber: sanitizeNumber(payload.mobileNumber),
         address: sanitizeString(payload.address),
         contactNumber: sanitizeNumber(payload.contactNumber),

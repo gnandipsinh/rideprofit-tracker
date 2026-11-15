@@ -59,6 +59,7 @@ function SettingsPage() {
   const [currency, setCurrency] = useState("INR");
   const [defaultVehicleId, setDefaultVehicleId] = useState(NO_DEFAULT);
   const [fullName, setFullName] = useState("");
+  const [userRole, setUserRole] = useState("Super Admin");
   const [email, setEmail] = useState("");
   const [mobileNumber, setMobileNumber] = useState("");
   const [address, setAddress] = useState("");
@@ -82,6 +83,7 @@ function SettingsPage() {
     setCurrency(settings.currency || "INR");
     setDefaultVehicleId(settings.defaultVehicleId || NO_DEFAULT);
     setFullName(settings.fullName || "");
+    setUserRole(settings.userRole || "Super Admin");
     setMobileNumber(settings.mobileNumber || "");
     setAddress(settings.address || "");
     setContactNumber(settings.contactNumber || "");
@@ -110,6 +112,7 @@ function SettingsPage() {
       currency,
       defaultVehicleId: defaultVehicleId === NO_DEFAULT ? null : defaultVehicleId,
       fullName: fullName.trim(),
+      userRole: userRole.trim() || "Super Admin",
       mobileNumber: mobileNumber.trim(),
       address: address.trim(),
       contactNumber: contactNumber.trim(),
@@ -120,6 +123,7 @@ function SettingsPage() {
       onSuccess: (saved) => {
         setTransportName(saved.transportationName || saved.businessName || saved.appName || name);
         setFullName(saved.fullName || payload.fullName);
+        setUserRole(saved.userRole || payload.userRole);
         setMobileNumber(saved.mobileNumber || payload.mobileNumber);
         setAddress(saved.address || payload.address);
         setContactNumber(saved.contactNumber || payload.contactNumber);
@@ -204,18 +208,18 @@ function SettingsPage() {
         </div>
 
         <div className="grid gap-4 lg:grid-cols-2">
-          <section className="glass-card rounded-2xl p-4 sm:p-5">
-            <h3 className="mb-4 flex items-center gap-2 text-sm font-bold">
-              <span className="grid h-6 w-6 place-items-center rounded-full bg-primary/15 text-primary text-[0.6rem]">
+          <section className="rounded-2xl border border-[#1C2B44] bg-[#10192A] p-5">
+            <h3 className="mb-4 flex items-center gap-2 text-sm font-bold text-white">
+              <span className="grid h-6 w-6 place-items-center rounded-lg bg-cyan-500/15 text-cyan-400 text-xs font-black">
                 1
               </span>
-              Profile
+              User Profile
             </h3>
             <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 <Label
                   htmlFor="fullName"
-                  className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground"
+                  className="text-xs font-semibold text-slate-400 uppercase tracking-wider"
                 >
                   Full Name
                 </Label>
@@ -223,28 +227,47 @@ function SettingsPage() {
                   id="fullName"
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
-                  className="h-12 rounded-xl bg-secondary/60 text-base"
-                  placeholder="Enter your full name"
+                  className="h-11 rounded-xl bg-[#080D18] border-[#1C2B44] text-sm text-white"
+                  placeholder="e.g. Gohil G."
                 />
               </div>
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 <Label
                   htmlFor="email"
-                  className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground"
+                  className="text-xs font-semibold text-slate-400 uppercase tracking-wider"
                 >
-                  Email
+                  Account Email
                 </Label>
                 <Input
                   id="email"
                   value={email}
                   readOnly
-                  className="h-12 rounded-xl bg-secondary/60 text-base text-muted-foreground"
+                  className="h-11 rounded-xl bg-[#080D18]/50 border-[#1C2B44] text-sm text-slate-400 cursor-not-allowed"
                 />
               </div>
-              <div className="space-y-2 sm:col-span-2">
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label
+                  htmlFor="userRole"
+                  className="text-xs font-semibold text-slate-400 uppercase tracking-wider"
+                >
+                  Role / Designation
+                </Label>
+                <Input
+                  id="userRole"
+                  value={userRole}
+                  onChange={(e) => setUserRole(e.target.value)}
+                  className="h-11 rounded-xl bg-[#080D18] border-[#1C2B44] text-sm text-white"
+                  placeholder="e.g. Super Admin, Fleet Owner, Transport Manager"
+                />
+                <p className="text-[0.7rem] text-slate-400">
+                  Displayed beside your name in the application header (e.g. Super Admin, Fleet
+                  Owner).
+                </p>
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
                 <Label
                   htmlFor="mobileNumber"
-                  className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground"
+                  className="text-xs font-semibold text-slate-400 uppercase tracking-wider"
                 >
                   Mobile Number
                 </Label>
@@ -252,94 +275,94 @@ function SettingsPage() {
                   id="mobileNumber"
                   value={mobileNumber}
                   onChange={(e) => setMobileNumber(e.target.value)}
-                  className="h-12 rounded-xl bg-secondary/60 text-base"
-                  placeholder="Enter mobile number"
+                  className="h-11 rounded-xl bg-[#080D18] border-[#1C2B44] text-sm text-white font-mono"
+                  placeholder="e.g. 9876543210"
                 />
               </div>
             </div>
           </section>
 
-          <section className="glass-card rounded-2xl p-4 sm:p-5 lg:order-3 lg:col-span-2">
-            <h3 className="mb-4 flex items-center gap-2 text-sm font-bold">
-              <span className="grid h-6 w-6 place-items-center rounded-full bg-primary/15 text-primary text-[0.6rem]">
+          <section className="rounded-2xl border border-[#1C2B44] bg-[#10192A] p-5 lg:order-3 lg:col-span-2">
+            <h3 className="mb-4 flex items-center gap-2 text-sm font-bold text-white">
+              <span className="grid h-6 w-6 place-items-center rounded-lg bg-cyan-500/15 text-cyan-400 text-xs font-black">
                 2
               </span>
-              Transport / Business Profile
+              Transport & Fleet Profile
             </h3>
             <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2 sm:col-span-2">
+              <div className="space-y-1.5 sm:col-span-2">
                 <Label
                   htmlFor="transportName"
-                  className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground"
+                  className="text-xs font-semibold text-slate-400 uppercase tracking-wider"
                 >
-                  Transport / Business Name
+                  Transport Business Name
                 </Label>
                 <Input
                   id="transportName"
                   value={transportName}
                   onChange={(e) => setTransportName(e.target.value)}
-                  className="h-12 rounded-xl bg-secondary/60 text-base"
-                  placeholder="Enter transport name"
+                  className="h-11 rounded-xl bg-[#080D18] border-[#1C2B44] text-sm text-white font-bold"
+                  placeholder="e.g. Gujarat Logistics Fleet"
                 />
-                <p className="text-[0.7rem] text-muted-foreground">
-                  Unified company name displayed across the app, reports, and bills.
+                <p className="text-xs text-slate-400">
+                  Business name printed on reports, PDF statements, and WhatsApp summaries.
                 </p>
               </div>
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 <Label
                   htmlFor="businessEmail"
-                  className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground"
+                  className="text-xs font-semibold text-slate-400 uppercase tracking-wider"
                 >
-                  Business Email
+                  Business Contact Email
                 </Label>
                 <Input
                   id="businessEmail"
                   type="email"
                   value={businessEmail}
                   onChange={(e) => setBusinessEmail(e.target.value)}
-                  className="h-12 rounded-xl bg-secondary/60 text-base"
-                  placeholder="Enter business email"
+                  className="h-11 rounded-xl bg-[#080D18] border-[#1C2B44] text-sm text-white"
+                  placeholder="contact@fleet.com"
                 />
               </div>
-              <div className="space-y-2 sm:col-span-2">
+              <div className="space-y-1.5 sm:col-span-2">
                 <Label
                   htmlFor="address"
-                  className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground"
+                  className="text-xs font-semibold text-slate-400 uppercase tracking-wider"
                 >
-                  Address
+                  Business Operating Address
                 </Label>
                 <Input
                   id="address"
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
-                  className="h-12 rounded-xl bg-secondary/60 text-base"
-                  placeholder="Enter address"
+                  className="h-11 rounded-xl bg-[#080D18] border-[#1C2B44] text-sm text-white"
+                  placeholder="Transport Nagar, Ring Road..."
                 />
               </div>
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 <Label
                   htmlFor="contactNumber"
-                  className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground"
+                  className="text-xs font-semibold text-slate-400 uppercase tracking-wider"
                 >
-                  Contact Number
+                  Office Phone
                 </Label>
                 <Input
                   id="contactNumber"
                   value={contactNumber}
                   onChange={(e) => setContactNumber(e.target.value)}
-                  className="h-12 rounded-xl bg-secondary/60 text-base"
-                  placeholder="Enter contact number"
+                  className="h-11 rounded-xl bg-[#080D18] border-[#1C2B44] text-sm text-white"
+                  placeholder="Office / Dispatch phone"
                 />
               </div>
-              <div className="space-y-2">
-                <Label className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                  Currency
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                  Currency Symbol
                 </Label>
                 <Select value={currency} onValueChange={setCurrency}>
-                  <SelectTrigger className="h-12 rounded-xl bg-secondary/60 text-base">
+                  <SelectTrigger className="h-11 rounded-xl bg-[#080D18] border-[#1C2B44] text-sm text-white">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="bg-[#080D18] border-[#1C2B44] text-white">
                     {CURRENCIES.map((c) => (
                       <SelectItem key={c.value} value={c.value}>
                         {c.label}
@@ -348,15 +371,15 @@ function SettingsPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-2">
-                <Label className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                  Default Vehicle
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                  Default Quick Vehicle
                 </Label>
                 <Select value={defaultVehicleId} onValueChange={setDefaultVehicleId}>
-                  <SelectTrigger className="h-12 rounded-xl bg-secondary/60 text-base">
+                  <SelectTrigger className="h-11 rounded-xl bg-[#080D18] border-[#1C2B44] text-sm text-white">
                     <SelectValue placeholder="No default" />
                   </SelectTrigger>
-                  <SelectContent className="max-h-72">
+                  <SelectContent className="max-h-72 bg-[#080D18] border-[#1C2B44] text-white">
                     <SelectItem value={NO_DEFAULT}>No default</SelectItem>
                     {activeVehicles.map((v) => (
                       <SelectItem key={v._id} value={v._id}>
@@ -368,16 +391,26 @@ function SettingsPage() {
                 </Select>
               </div>
             </div>
+            <div className="mt-5 pt-4 border-t border-[#1C2B44]">
+              <Button
+                onClick={submit}
+                disabled={save.isPending}
+                className="h-11 px-6 rounded-xl font-bold bg-cyan-500 text-slate-950 hover:bg-cyan-400"
+              >
+                <Save className="mr-2 h-4 w-4" />
+                {save.isPending ? "Saving..." : "Save Settings"}
+              </Button>
+            </div>
           </section>
 
-          <section className="glass-card rounded-2xl p-4 sm:p-5 lg:order-2">
-            <h3 className="mb-4 flex items-center gap-2 text-sm font-bold">
-              <span className="grid h-6 w-6 place-items-center rounded-full bg-primary/15 text-primary text-[0.6rem]">
+          <section className="rounded-2xl border border-[#1C2B44] bg-[#10192A] p-5 lg:order-2">
+            <h3 className="mb-4 flex items-center gap-2 text-sm font-bold text-white">
+              <span className="grid h-6 w-6 place-items-center rounded-lg bg-cyan-500/15 text-cyan-400 text-xs font-black">
                 3
               </span>
-              Security
+              Account Security
             </h3>
-            <div className="space-y-4">
+            <div className="space-y-3.5">
               {[
                 {
                   id: "currentPassword",
@@ -398,10 +431,10 @@ function SettingsPage() {
                   setter: setConfirmNewPassword,
                 },
               ].map(({ id, label, value, setter }) => (
-                <div key={id} className="space-y-2">
+                <div key={id} className="space-y-1.5">
                   <Label
                     htmlFor={id}
-                    className="text-[0.7rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground"
+                    className="text-xs font-semibold text-slate-400 uppercase tracking-wider"
                   >
                     {label}
                   </Label>
@@ -411,42 +444,34 @@ function SettingsPage() {
                       type={showPasswords ? "text" : "password"}
                       value={value}
                       onChange={(e) => setter(e.target.value)}
-                      className="h-12 rounded-xl bg-secondary/60 text-base pr-10"
+                      className="h-11 rounded-xl bg-[#080D18] border-[#1C2B44] text-sm text-white pr-10"
                     />
                     <button
                       type="button"
                       aria-label={showPasswords ? "Hide password" : "Show password"}
                       onClick={() => setShowPasswords((shown) => !shown)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-muted-foreground transition-colors hover:text-foreground"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-slate-400 transition-colors hover:text-white"
                     >
                       {showPasswords ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
                 </div>
               ))}
-              <div className="grid gap-2 pt-2 sm:grid-cols-2">
+              <div className="grid gap-2 pt-3">
                 <Button
                   onClick={changePassword}
                   disabled={passwordBusy || save.isPending}
-                  className="h-12 w-full rounded-xl font-semibold"
+                  className="h-11 w-full rounded-xl font-bold bg-[#172844] hover:bg-[#1f355a] text-white border border-[#1C2B44]"
                 >
                   {passwordBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                  Change Password
-                </Button>
-                <Button
-                  onClick={submit}
-                  disabled={save.isPending}
-                  className="h-12 w-full rounded-xl text-base font-semibold"
-                >
-                  <Save className="mr-1.5 h-4 w-4" />
-                  {save.isPending ? "Saving…" : "Save settings"}
+                  Update Password
                 </Button>
                 <Button
                   variant="outline"
                   onClick={logout}
-                  className="h-11 w-full rounded-xl sm:col-span-2"
+                  className="h-11 w-full rounded-xl border-[#1C2B44] bg-[#080D18] text-rose-400 hover:bg-rose-500/10 hover:text-rose-300"
                 >
-                  <LogOut className="mr-2 h-4 w-4" /> Logout
+                  <LogOut className="mr-2 h-4 w-4" /> Log Out
                 </Button>
               </div>
             </div>
