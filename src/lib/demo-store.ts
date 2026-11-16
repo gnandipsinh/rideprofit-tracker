@@ -265,6 +265,30 @@ export function clearDemoSession(): void {
   removeStorage(DEMO_SESSION_KEY);
 }
 
+export function getDeviceBackupSnapshot(): DemoStoreData | null {
+  const raw = readStorage(DEMO_DATA_KEY);
+  if (!raw) return memoryData ? cloneData(memoryData) : null;
+  try {
+    const parsed = JSON.parse(raw) as DemoStoreData;
+    if (
+      parsed &&
+      Array.isArray(parsed.vehicles) &&
+      Array.isArray(parsed.trips) &&
+      parsed.settings
+    ) {
+      return parsed;
+    }
+  } catch {
+    /* ignore corrupt storage */
+  }
+  return null;
+}
+
+export function hasDeviceBackupData(): boolean {
+  const snap = getDeviceBackupSnapshot();
+  return Boolean(snap && (snap.vehicles.length > 0 || snap.trips.length > 0));
+}
+
 function genId(prefix: string): string {
   const raw =
     typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"

@@ -14,7 +14,33 @@ export const keys = {
 };
 
 function fail(error: unknown, fallback: string) {
-  toast.error(error instanceof ApiError ? error.message : fallback);
+  if (error instanceof ApiError) {
+    toast.error(error.message);
+    return;
+  }
+  if (error instanceof Error && error.message.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(error.message) as { error?: string };
+      if (parsed.error) {
+        const lower = parsed.error.toLowerCase();
+        if (lower.includes("quota")) {
+          toast.error(
+            "Database quota reached. Please try again later or switch to Device Storage.",
+          );
+          return;
+        }
+        if (lower.includes("permission") || lower.includes("insufficient")) {
+          toast.error("Permission denied. Please sign in again.");
+          return;
+        }
+        toast.error(parsed.error);
+        return;
+      }
+    } catch {
+      /* ignore non-json */
+    }
+  }
+  toast.error(fallback);
 }
 
 export function useHealth() {

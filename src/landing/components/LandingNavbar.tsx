@@ -117,34 +117,32 @@ export function LandingNavbar({ activeSection = "home" }: LandingNavbarProps) {
           <div className="hidden md:flex items-center gap-3">
             <Link
               to="/auth"
-              className="landing-btn-glass rounded-xl px-5 py-2.5 text-sm font-bold text-slate-200 hover:text-white"
+              className="rounded-xl border border-[#1C2B44] bg-[#10192A] px-5 py-2.5 text-sm font-bold text-slate-200 hover:text-white hover:bg-[#172844] transition-colors"
             >
-              Login
+              Sign In
             </Link>
             <Link
               to="/auth"
-              search={{ mode: "register" }}
-              className="landing-btn-primary group flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold shadow-[0_0_20px_rgba(6,182,212,0.3)] hover:shadow-[0_0_25px_rgba(6,182,212,0.5)]"
+              className="flex items-center gap-2 rounded-xl bg-cyan-500 px-5 py-2.5 text-sm font-bold text-slate-950 hover:bg-cyan-400 transition-colors"
             >
-              <span>Get Started</span>
-              <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-1" />
+              <span>Open App</span>
+              <ArrowRight className="h-4 w-4" />
             </Link>
           </div>
 
-          {/* Mobile Right Controls: Compact Get Started + Menu Toggle */}
+          {/* Mobile Right Controls: Compact Open App + Menu Toggle */}
           <div className="flex md:hidden items-center gap-2">
             <Link
               to="/auth"
-              search={{ mode: "register" }}
-              className="landing-btn-primary flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold shadow-[0_0_15px_rgba(6,182,212,0.35)]"
+              className="flex items-center gap-1.5 rounded-xl bg-cyan-500 px-3.5 py-2 text-xs font-bold text-slate-950 hover:bg-cyan-400 transition-colors"
             >
-              <span>Get Started</span>
+              <span>Open App</span>
               <ArrowRight className="h-3.5 w-3.5" />
             </Link>
             <button
               type="button"
               onClick={() => setMobileOpen(!mobileOpen)}
-              className="flex h-10 w-10 items-center justify-center rounded-xl border border-cyan-500/25 bg-slate-900/90 text-slate-200 transition-all hover:border-cyan-400 hover:text-white"
+              className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#1C2B44] bg-[#10192A] text-slate-200 transition-colors hover:border-cyan-400 hover:text-white"
               aria-label="Toggle navigation menu"
               aria-expanded={mobileOpen}
             >
@@ -155,7 +153,7 @@ export function LandingNavbar({ activeSection = "home" }: LandingNavbarProps) {
 
         {/* Mobile Drawer */}
         {mobileOpen && (
-          <div className="border-b border-cyan-500/25 bg-[#050b16]/98 backdrop-blur-2xl px-4 py-5 md:hidden animate-in fade-in slide-in-from-top-3 duration-200">
+          <div className="border-b border-[#1C2B44] bg-[#080D18] px-4 py-5 md:hidden">
             <nav className="flex flex-col gap-1.5">
               {navLinks.map((link) => {
                 const Icon = link.icon;
@@ -168,7 +166,7 @@ export function LandingNavbar({ activeSection = "home" }: LandingNavbarProps) {
                     className={cn(
                       "flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold transition-all",
                       isActive
-                        ? "bg-gradient-to-r from-purple-600/25 to-cyan-500/25 border border-cyan-500/35 text-white font-bold shadow-[0_0_15px_rgba(6,182,212,0.2)]"
+                        ? "bg-cyan-500/15 border border-cyan-500/35 text-white font-bold"
                         : "text-slate-300 hover:bg-slate-800/70 hover:text-white",
                     )}
                   >
@@ -184,19 +182,10 @@ export function LandingNavbar({ activeSection = "home" }: LandingNavbarProps) {
                 <Link
                   to="/auth"
                   onClick={() => setMobileOpen(false)}
-                  className="landing-btn-glass flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold"
+                  className="flex items-center justify-center gap-2 rounded-xl border border-[#1C2B44] bg-[#10192A] py-3 text-sm font-bold text-white"
                 >
-                  <LogIn className="h-4 w-4 text-slate-400" />
-                  <span>Login</span>
-                </Link>
-                <Link
-                  to="/auth"
-                  search={{ mode: "register" }}
-                  onClick={() => setMobileOpen(false)}
-                  className="landing-btn-primary flex items-center justify-center gap-2 rounded-xl py-3 text-sm font-bold shadow-[0_0_20px_rgba(6,182,212,0.4)]"
-                >
-                  <span>Get Started Free</span>
-                  <ArrowRight className="h-4 w-4" />
+                  <LogIn className="h-4 w-4 text-cyan-400" />
+                  <span>Sign In / Open App</span>
                 </Link>
               </div>
             </nav>

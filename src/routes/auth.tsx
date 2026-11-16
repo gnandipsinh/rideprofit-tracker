@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import {
+  ChevronDown,
+  ChevronUp,
   Eye,
   EyeOff,
+  HardDrive,
   Loader2,
   Lock,
   Mail,
   Phone,
   ShieldCheck,
-  Sparkles,
   Truck,
   User,
 } from "lucide-react";
@@ -38,18 +40,17 @@ export const Route = createFileRoute("/auth")({
   }),
   head: () => ({
     meta: [
-      { title: "Vehicle Calculation System — Fleet Accounting" },
+      { title: "Sign In — RideProfit Tracker" },
       {
         name: "description",
-        content: "Sign in to access your fleet accounting dashboard.",
+        content: "Sign in to manage your vehicles, daily trips, and profit reports.",
       },
-      { property: "og:title", content: "Vehicle Calculation System — Fleet Accounting" },
+      { property: "og:title", content: "Sign In — RideProfit Tracker" },
       {
         property: "og:description",
-        content: "Secure fleet accounting for your transport business.",
+        content: "Simple vehicle accounting for your transport business.",
       },
       { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
   component: AuthPage,
@@ -82,15 +83,12 @@ function PasswordField({
 }) {
   const [show, setShow] = useState(false);
   return (
-    <div className="space-y-2">
-      <Label
-        htmlFor={id}
-        className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-      >
+    <div className="space-y-1.5">
+      <Label htmlFor={id} className="text-xs font-semibold uppercase tracking-wide text-slate-400">
         {label}
       </Label>
       <div className="relative">
-        <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
         <Input
           id={id}
           type={show ? "text" : "password"}
@@ -99,20 +97,20 @@ function PasswordField({
           placeholder={placeholder}
           onChange={(e) => onChange(e.target.value)}
           className={cn(
-            "h-12 pl-9 pr-11 rounded-xl bg-secondary/60 text-base",
-            error && "border-destructive focus-visible:ring-destructive",
+            "h-11 pl-9 pr-11 rounded-xl bg-[#080D18] border-[#1C2B44] text-sm text-white",
+            error && "border-rose-500 focus-visible:ring-rose-500",
           )}
         />
         <button
           type="button"
           onClick={() => setShow((s) => !s)}
           aria-label={show ? "Hide password" : "Show password"}
-          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-2 text-muted-foreground hover:text-foreground transition-colors"
+          className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-2 text-slate-400 hover:text-white transition-colors"
         >
           {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
         </button>
       </div>
-      {error ? <p className="mt-1 text-xs font-medium text-destructive">{error}</p> : null}
+      {error ? <p className="text-xs font-medium text-rose-400">{error}</p> : null}
     </div>
   );
 }
@@ -130,25 +128,22 @@ function Field({
   error?: string | undefined;
 }) {
   return (
-    <div className="space-y-2">
-      <Label
-        htmlFor={id}
-        className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-      >
+    <div className="space-y-1.5">
+      <Label htmlFor={id} className="text-xs font-semibold uppercase tracking-wide text-slate-400">
         {label}
       </Label>
       <div className="relative">
-        <Icon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Icon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
         <Input
           id={id}
           {...rest}
           className={cn(
-            "h-12 pl-9 rounded-xl bg-secondary/60 text-base",
-            error && "border-destructive focus-visible:ring-destructive",
+            "h-11 pl-9 rounded-xl bg-[#080D18] border-[#1C2B44] text-sm text-white",
+            error && "border-rose-500 focus-visible:ring-rose-500",
           )}
         />
       </div>
-      {error ? <p className="mt-1 text-xs font-medium text-destructive">{error}</p> : null}
+      {error ? <p className="text-xs font-medium text-rose-400">{error}</p> : null}
     </div>
   );
 }
@@ -157,14 +152,10 @@ function AuthPage() {
   const navigate = useNavigate();
   const searchParams = Route.useSearch();
 
-  const [step, setStep] = useState<Step>(() => {
-    if (searchParams.mode === "register") return "register";
-    if (typeof window !== "undefined") {
-      const mode = new URLSearchParams(window.location.search).get("mode");
-      if (mode === "register") return "register";
-    }
-    return "login";
-  });
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [step, setStep] = useState<Step>(() =>
+    searchParams.mode === "register" ? "register" : "login",
+  );
   const [busy, setBusy] = useState(false);
   const requestInFlight = useRef(false);
   const navigatingRef = useRef(false);
@@ -178,7 +169,7 @@ function AuthPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
 
   const [notice, setNotice] = useState("");
-  const [demoLoading, setDemoLoading] = useState(false);
+  const [deviceLoading, setDeviceLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
 
   const navigateHome = useCallback(() => {
@@ -216,29 +207,28 @@ function AuthPage() {
     }
   }
 
-  async function handleDemoLogin() {
+  async function handleDeviceLogin() {
     setFormError("");
-    setDemoLoading(true);
+    setDeviceLoading(true);
     try {
       const { error } = await supabase.auth.signInAsDemo();
       if (error) {
-        const msg = error.message || "Failed to load demo account";
+        const msg = error.message || "Failed to open local workspace";
         setFormError(msg);
         toast.error(msg);
         return;
       }
-      toast.success("Welcome to Demo Mode! Exploring Express Logistics Fleet.");
+      toast.success("Workspace opened. Your data stays saved on this device.");
       navigateHome();
     } catch {
-      toast.error("An error occurred starting demo account.");
+      toast.error("Could not start local workspace.");
     } finally {
-      setDemoLoading(false);
+      setDeviceLoading(false);
     }
   }
 
   useEffect(() => {
     let active = true;
-    // If a session already exists there is nothing to do on this screen.
     supabase.auth.getUser().then((res: { data: { user: unknown } }) => {
       if (active && res.data?.user) {
         navigateHome();
@@ -294,7 +284,6 @@ function AuthPage() {
         },
       });
       if (error) {
-        // Show the actual server error message directly (duplicate email, etc.)
         setFormError(error.message || GENERIC_ERROR);
         return;
       }
@@ -304,7 +293,7 @@ function AuthPage() {
       toast.success("Account created successfully!");
       navigateHome();
     } catch {
-      if (succeeded) return; // redirect raised after a successful registration
+      if (succeeded) return;
       setFormError(GENERIC_ERROR);
     } finally {
       requestInFlight.current = false;
@@ -344,7 +333,7 @@ function AuthPage() {
       toast.success("Signed in successfully");
       navigateHome();
     } catch {
-      if (succeeded) return; // redirect raised after a successful sign-in
+      if (succeeded) return;
       setFormError(GENERIC_ERROR);
     } finally {
       requestInFlight.current = false;
@@ -370,10 +359,8 @@ function AuthPage() {
         setFormError(res.error.message || GENERIC_ERROR);
         return;
       }
-      toast.success("Password reset email sent! Check your inbox.");
-      setNotice(
-        `We sent a password reset link to ${parsed.data}. Check your inbox (and spam folder), then return here to sign in.`,
-      );
+      toast.success("Password reset email sent!");
+      setNotice(`We sent a password reset link to ${parsed.data}. Check your inbox.`);
     } catch {
       setFormError(GENERIC_ERROR);
     } finally {
@@ -382,309 +369,301 @@ function AuthPage() {
     }
   }
 
-  const heading: Record<Step, { title: string; sub: string }> = {
-    login: { title: "Welcome back", sub: "Sign in securely to your fleet accounting workspace." },
-    register: {
-      title: "Create your account",
-      sub: "Register with Google or email to sync your vehicles, trips, and settings.",
-    },
-    forgot: {
-      title: "Forgot password",
-      sub: "We'll email you a secure password reset link.",
-    },
-  };
-
-  const googleButton = (
-    <Button
-      type="button"
-      variant="outline"
-      disabled={busy || googleLoading}
-      onClick={handleGoogleLogin}
-      className="h-12 w-full rounded-xl text-sm font-bold border-[#1C2B44] bg-[#0B111E] hover:bg-[#132137] text-white"
-    >
-      {googleLoading ? (
-        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-      ) : (
-        <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24" aria-hidden="true">
-          <path
-            fill="#4285F4"
-            d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"
-          />
-          <path
-            fill="#34A853"
-            d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.14C3.26 21.3 7.31 24 12 24z"
-          />
-          <path
-            fill="#FBBC05"
-            d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14z"
-          />
-          <path
-            fill="#EA4335"
-            d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96z"
-          />
-        </svg>
-      )}
-      Continue with Google
-    </Button>
-  );
+  const isSignInMethodError = formError.toLowerCase().includes("sign-in method");
+  const isDomainError = formError.toLowerCase().includes("authorized domains");
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-4 py-8 pb-[env(safe-area-inset-bottom)] sm:px-6 lg:px-8">
-      <div className="w-full max-w-md lg:max-w-[30rem]">
-        <div className="mb-4 flex items-center justify-between">
-          <Link
-            to="/landing"
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-cyan-400 hover:text-cyan-300 transition-colors hover:underline"
-          >
-            ← View RideProfit Landing Page
-          </Link>
-        </div>
-
-        <div className="mb-6 flex flex-col items-center text-center">
-          <div className="grid h-14 w-14 place-items-center rounded-2xl bg-cyan-500/15 text-cyan-400 ring-1 ring-cyan-400/40 shadow-lg shadow-cyan-500/20">
-            <Truck className="h-7 w-7" />
+    <div className="flex min-h-screen items-center justify-center bg-[#0B111E] px-4 py-8 pb-[env(safe-area-inset-bottom)]">
+      <div className="w-full max-w-md space-y-5">
+        <div className="flex flex-col items-center text-center">
+          <div className="grid h-12 w-12 place-items-center rounded-2xl bg-cyan-500/15 text-cyan-400 border border-cyan-500/30">
+            <Truck className="h-6 w-6" />
           </div>
-          <h1 className="mt-3 text-2xl font-black tracking-tight text-white flex items-center justify-center">
-            RideProfit
-          </h1>
-          <p className="text-[0.68rem] font-bold uppercase tracking-[0.25em] text-cyan-400">
-            Tracker
+          <h1 className="mt-3 text-xl font-black tracking-tight text-white">RideProfit Tracker</h1>
+          <p className="text-xs text-slate-400 mt-1">
+            Simple vehicle, trip &amp; profit accounting
           </p>
         </div>
 
-        <div className="rounded-2xl p-6 sm:p-7 border border-[#1C2B44] bg-[#10192A] shadow-2xl">
-          <div className="mb-5">
-            <h2 className="text-xl font-extrabold">{heading[step].title}</h2>
-            <p className="mt-1 text-sm text-muted-foreground">{heading[step].sub}</p>
+        <div className="rounded-2xl p-5 sm:p-6 border border-[#1C2B44] bg-[#10192A] shadow-xl space-y-4">
+          <div>
+            <h2 className="text-lg font-extrabold text-white">Sign in to continue</h2>
+            <p className="mt-0.5 text-xs text-slate-400">
+              Choose Google for multi-device cloud backup, or start directly on this device.
+            </p>
           </div>
 
           {formError ? (
-            <div className="mb-4 rounded-xl border border-destructive/40 bg-destructive/10 px-3.5 py-2.5 text-xs font-medium text-destructive space-y-2">
+            <div className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-3.5 py-2.5 text-xs font-medium text-rose-300 space-y-2">
               <p>{formError}</p>
-              {formError.toLowerCase().includes("sign-in method") ? (
-                <div className="flex flex-wrap items-center gap-2 pt-1">
-                  <a
-                    href="https://console.firebase.google.com/project/gen-lang-client-0656218186/authentication/providers"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center rounded-lg bg-slate-900/80 px-2.5 py-1 text-[0.7rem] font-semibold text-cyan-300 border border-cyan-500/30 hover:bg-slate-800"
-                  >
-                    Enable Email/Password in Firebase Console →
-                  </a>
-                </div>
+              {isSignInMethodError ? (
+                <a
+                  href="https://console.firebase.google.com/project/gen-lang-client-0656218186/authentication/providers"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center rounded-lg bg-[#080D18] px-2.5 py-1 text-[0.72rem] font-semibold text-cyan-300 border border-cyan-500/30 hover:bg-[#132137]"
+                >
+                  Open Firebase Sign-In Settings →
+                </a>
+              ) : null}
+              {isDomainError ? (
+                <a
+                  href="https://console.firebase.google.com/project/gen-lang-client-0656218186/authentication/settings"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center rounded-lg bg-[#080D18] px-2.5 py-1 text-[0.72rem] font-semibold text-cyan-300 border border-cyan-500/30 hover:bg-[#132137]"
+                >
+                  Add Domain in Firebase Settings →
+                </a>
               ) : null}
             </div>
           ) : null}
 
-          {step !== "forgot" ? (
-            <div className="mb-5 space-y-3">
-              {googleButton}
-              <div className="relative flex items-center py-1">
-                <div className="flex-grow border-t border-border/60" />
-                <span className="mx-3 shrink-0 text-[0.68rem] font-semibold uppercase tracking-wider text-muted-foreground">
-                  Or continue with email
-                </span>
-                <div className="flex-grow border-t border-border/60" />
-              </div>
-            </div>
-          ) : null}
+          <div className="space-y-3">
+            <Button
+              type="button"
+              disabled={busy || googleLoading || deviceLoading}
+              onClick={handleGoogleLogin}
+              className="h-12 w-full rounded-xl text-sm font-bold bg-white text-slate-900 hover:bg-slate-100"
+            >
+              {googleLoading ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    fill="#4285F4"
+                    d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"
+                  />
+                  <path
+                    fill="#34A853"
+                    d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.29v3.14C3.26 21.3 7.31 24 12 24z"
+                  />
+                  <path
+                    fill="#FBBC05"
+                    d="M5.28 14.24c-.24-.72-.38-1.49-.38-2.24s.14-1.52.38-2.24V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.99-3.14z"
+                  />
+                  <path
+                    fill="#EA4335"
+                    d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.99 3.14c.95-2.85 3.6-4.96 6.72-4.96z"
+                  />
+                </svg>
+              )}
+              Continue with Google
+            </Button>
 
-          {step === "login" ? (
-            <form onSubmit={handleLogin} className="space-y-4">
-              <Field
-                id="login-email"
-                label="Email"
-                icon={Mail}
-                type="email"
-                inputMode="email"
-                autoComplete="email"
-                placeholder="you@company.com"
-                value={email}
-                error={errors["email"]}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-              <PasswordField
-                id="login-password"
-                label="Password"
-                autoComplete="current-password"
-                value={password}
-                onChange={setPassword}
-                error={errors["password"]}
-              />
-              <button
-                type="button"
-                onClick={() => reset("forgot")}
-                className="text-xs font-semibold text-primary hover:underline"
-              >
-                Forgot password?
-              </button>
-              <Button
-                type="submit"
-                disabled={busy}
-                className="h-12 w-full rounded-xl text-sm font-bold"
-              >
-                {busy ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <ShieldCheck className="mr-2 h-4 w-4" />
-                )}
-                Login
-              </Button>
-              <p className="text-center text-xs text-muted-foreground">
-                New here?{" "}
-                <button
-                  type="button"
-                  onClick={() => reset("register")}
-                  className="font-semibold text-primary hover:underline"
-                >
-                  Create an account
-                </button>
-              </p>
-            </form>
-          ) : null}
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleDeviceLogin}
+              disabled={busy || deviceLoading || googleLoading}
+              className="h-12 w-full rounded-xl text-sm font-bold text-cyan-300 bg-cyan-500/10 hover:bg-cyan-500/20 border-cyan-500/35 hover:text-cyan-200"
+            >
+              {deviceLoading ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <HardDrive className="mr-2 h-4 w-4 text-cyan-400" />
+              )}
+              Use on This Device (No Login Needed)
+            </Button>
+          </div>
 
-          {step === "register" ? (
-            <form onSubmit={handleRegister} className="space-y-4">
-              <Field
-                id="reg-name"
-                label="Full name"
-                icon={User}
-                autoComplete="name"
-                placeholder="Enter your full name"
-                value={fullName}
-                error={errors["fullName"]}
-                onChange={(e) => setFullName(e.target.value)}
-              />
-              <Field
-                id="reg-mobile"
-                label="Mobile number"
-                icon={Phone}
-                inputMode="numeric"
-                maxLength={10}
-                autoComplete="tel"
-                placeholder="Enter mobile number"
-                value={mobile}
-                error={errors["mobile"]}
-                onChange={(e) => setMobile(e.target.value.replace(/\D/g, "").slice(0, 10))}
-              />
-              <Field
-                id="reg-email"
-                label="Email"
-                icon={Mail}
-                type="email"
-                inputMode="email"
-                autoComplete="email"
-                placeholder="Enter your email"
-                value={email}
-                error={errors["email"]}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-              <PasswordField
-                id="reg-password"
-                label="Password"
-                autoComplete="new-password"
-                placeholder="Enter password"
-                value={password}
-                onChange={setPassword}
-                error={errors["password"]}
-              />
-              <PasswordField
-                id="reg-confirm"
-                label="Confirm password"
-                autoComplete="new-password"
-                placeholder="Confirm password"
-                value={confirmPassword}
-                onChange={setConfirmPassword}
-                error={errors["confirmPassword"]}
-              />
-              <Button
-                type="submit"
-                disabled={busy}
-                className="h-12 w-full rounded-xl text-sm font-bold"
-              >
-                {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                Create account
-              </Button>
-              <p className="text-center text-xs text-muted-foreground">
-                Already registered?{" "}
-                <button
-                  type="button"
-                  onClick={() => reset("login")}
-                  className="font-semibold text-primary hover:underline"
-                >
-                  Sign in
-                </button>
-              </p>
-            </form>
-          ) : null}
-
-          {step === "forgot" ? (
-            <form onSubmit={handleForgot} className="space-y-4">
-              {notice ? (
-                <div className="rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-3 py-2 text-xs font-medium text-cyan-300">
-                  {notice}
-                </div>
-              ) : null}
-              <Field
-                id="forgot-email"
-                label="Registered email"
-                icon={Mail}
-                type="email"
-                inputMode="email"
-                autoComplete="email"
-                placeholder="Enter your email"
-                value={email}
-                error={errors["email"]}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-              <Button
-                type="submit"
-                disabled={busy}
-                className="h-12 w-full rounded-xl text-sm font-bold"
-              >
-                {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                Send reset link
-              </Button>
-              <p className="text-center text-xs text-muted-foreground">
-                <button
-                  type="button"
-                  onClick={() => reset("login")}
-                  className="font-semibold text-primary hover:underline"
-                >
-                  Back to sign in
-                </button>
-              </p>
-            </form>
-          ) : null}
-
-          {/* Instant Demo Account Access */}
-          <div className="mt-6 pt-5 border-t border-border/60 space-y-2.5">
+          {/* Optional Email/Password Section (Collapsed by default to avoid friction) */}
+          <div className="pt-2 border-t border-[#1C2B44]">
             <button
               type="button"
-              onClick={handleDemoLogin}
-              disabled={busy || demoLoading}
-              className="w-full flex items-center justify-center gap-2 rounded-xl py-3 px-4 text-xs font-bold text-cyan-300 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 hover:border-cyan-400 transition-all cursor-pointer disabled:opacity-50"
+              aria-expanded={emailOpen}
+              onClick={() => {
+                setEmailOpen((v) => !v);
+                setFormError("");
+                setErrors({});
+              }}
+              className="w-full flex items-center justify-between py-2 text-xs font-semibold text-slate-400 hover:text-white transition-colors"
             >
-              <Sparkles className="h-3.5 w-3.5 text-cyan-400 animate-pulse" />
-              <span>
-                {demoLoading ? "Starting Demo…" : "Try Demo Account (Instant 1-Click Access)"}
-              </span>
+              <span>Use Email &amp; Password instead</span>
+              {emailOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
             </button>
-            <div className="text-center">
-              <Link
-                to="/landing"
-                className="inline-block text-[0.75rem] font-medium text-muted-foreground hover:text-cyan-400 transition-colors"
-              >
-                ← Back to Landing Page
-              </Link>
-            </div>
+
+            {emailOpen ? (
+              <div className="mt-3 space-y-4">
+                {step === "login" ? (
+                  <form onSubmit={handleLogin} className="space-y-3">
+                    <Field
+                      id="login-email"
+                      label="Email"
+                      icon={Mail}
+                      type="email"
+                      inputMode="email"
+                      autoComplete="email"
+                      placeholder="you@company.com"
+                      value={email}
+                      error={errors["email"]}
+                      onChange={(e) => setEmail(e.target.value)}
+                    />
+                    <PasswordField
+                      id="login-password"
+                      label="Password"
+                      autoComplete="current-password"
+                      value={password}
+                      onChange={setPassword}
+                      error={errors["password"]}
+                    />
+                    <div className="flex items-center justify-between text-xs">
+                      <button
+                        type="button"
+                        onClick={() => reset("forgot")}
+                        className="font-semibold text-cyan-400 hover:underline"
+                      >
+                        Forgot password?
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => reset("register")}
+                        className="font-semibold text-cyan-400 hover:underline"
+                      >
+                        Create account
+                      </button>
+                    </div>
+                    <Button
+                      type="submit"
+                      disabled={busy}
+                      className="h-11 w-full rounded-xl text-sm font-bold bg-cyan-500 text-slate-950 hover:bg-cyan-400"
+                    >
+                      {busy ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <ShieldCheck className="mr-2 h-4 w-4" />
+                      )}
+                      Login
+                    </Button>
+                  </form>
+                ) : null}
+
+                {step === "register" ? (
+                  <form onSubmit={handleRegister} className="space-y-3">
+                    <Field
+                      id="reg-name"
+                      label="Full name"
+                      icon={User}
+                      autoComplete="name"
+                      placeholder="Enter your full name"
+                      value={fullName}
+                      error={errors["fullName"]}
+                      onChange={(e) => setFullName(e.target.value)}
+                    />
+                    <Field
+                      id="reg-mobile"
+                      label="Mobile number"
+                      icon={Phone}
+                      inputMode="numeric"
+                      maxLength={10}
+                      autoComplete="tel"
+                      placeholder="10-digit mobile number"
+                      value={mobile}
+                      error={errors["mobile"]}
+                      onChange={(e) => setMobile(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                    />
+                    <Field
+                      id="reg-email"
+                      label="Email"
+                      icon={Mail}
+                      type="email"
+                      inputMode="email"
+                      autoComplete="email"
+                      placeholder="Enter your email"
+                      value={email}
+                      error={errors["email"]}
+                      onChange={(e) => setEmail(e.target.value)}
+                    />
+                    <PasswordField
+                      id="reg-password"
+                      label="Password"
+                      autoComplete="new-password"
+                      placeholder="Min 8 chars, letters + numbers"
+                      value={password}
+                      onChange={setPassword}
+                      error={errors["password"]}
+                    />
+                    <PasswordField
+                      id="reg-confirm"
+                      label="Confirm password"
+                      autoComplete="new-password"
+                      placeholder="Confirm password"
+                      value={confirmPassword}
+                      onChange={setConfirmPassword}
+                      error={errors["confirmPassword"]}
+                    />
+                    <Button
+                      type="submit"
+                      disabled={busy}
+                      className="h-11 w-full rounded-xl text-sm font-bold bg-cyan-500 text-slate-950 hover:bg-cyan-400"
+                    >
+                      {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                      Create account
+                    </Button>
+                    <p className="text-center text-xs text-slate-400">
+                      Already have an account?{" "}
+                      <button
+                        type="button"
+                        onClick={() => reset("login")}
+                        className="font-semibold text-cyan-400 hover:underline"
+                      >
+                        Sign in
+                      </button>
+                    </p>
+                  </form>
+                ) : null}
+
+                {step === "forgot" ? (
+                  <form onSubmit={handleForgot} className="space-y-3">
+                    {notice ? (
+                      <div className="rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-3 py-2 text-xs font-medium text-cyan-300">
+                        {notice}
+                      </div>
+                    ) : null}
+                    <Field
+                      id="forgot-email"
+                      label="Registered email"
+                      icon={Mail}
+                      type="email"
+                      inputMode="email"
+                      autoComplete="email"
+                      placeholder="Enter your email"
+                      value={email}
+                      error={errors["email"]}
+                      onChange={(e) => setEmail(e.target.value)}
+                    />
+                    <Button
+                      type="submit"
+                      disabled={busy}
+                      className="h-11 w-full rounded-xl text-sm font-bold bg-cyan-500 text-slate-950 hover:bg-cyan-400"
+                    >
+                      {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                      Send reset link
+                    </Button>
+                    <p className="text-center text-xs text-slate-400">
+                      <button
+                        type="button"
+                        onClick={() => reset("login")}
+                        className="font-semibold text-cyan-400 hover:underline"
+                      >
+                        Back to sign in
+                      </button>
+                    </p>
+                  </form>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         </div>
 
-        <p className="mt-5 text-center text-[0.7rem] leading-relaxed text-muted-foreground">
-          Secured by Firebase Authentication &amp; Cloud Firestore. Your fleet records are private
-          to your account.
-        </p>
+        <div className="text-center">
+          <Link
+            to="/landing"
+            className="text-xs font-medium text-slate-400 hover:text-cyan-400 transition-colors"
+          >
+            ← Back to Home
+          </Link>
+        </div>
       </div>
     </div>
   );

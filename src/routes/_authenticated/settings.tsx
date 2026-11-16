@@ -2,9 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  Cloud,
+  CloudUpload,
   Download,
   Eye,
   EyeOff,
+  HardDrive,
   HardDriveDownload,
   Loader2,
   LogOut,
@@ -27,6 +30,7 @@ import {
 import { useApp } from "@/lib/app-context";
 import { useSaveSettings } from "@/lib/queries";
 import { api, sanitizeEmail } from "@/lib/api";
+import { getDeviceBackupSnapshot, hasDeviceBackupData } from "@/lib/demo-store";
 import { supabase } from "@/integrations/supabase/client";
 
 const CURRENCIES = [
@@ -82,12 +86,13 @@ function SettingsPage() {
   const [passwordBusy, setPasswordBusy] = useState(false);
   const [hydratedFor, setHydratedFor] = useState("");
   const [backupBusy, setBackupBusy] = useState(false);
+  const [authProvider, setAuthProvider] = useState<string>(isDemo ? "demo" : "google");
+  const [deviceBackupAvailable, setDeviceBackupAvailable] = useState<boolean>(() =>
+    hasDeviceBackupData(),
+  );
   const restoreInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    // Hydrate per settings record (_id is `set_<userId>`): if the cached record
-    // belongs to a different account than the one shown now, re-hydrate with
-    // this account's values so another account's profile can never stick here.
     if (!settings || hydratedFor === settings._id) return;
     const initialName =
       settings.transportationName || settings.businessName || settings.appName || "";
@@ -104,12 +109,29 @@ function SettingsPage() {
   }, [settings, hydratedFor]);
 
   useEffect(() => {
-    void supabase.auth
-      .getUser()
-      .then((res: { data: { user: { id?: string; email?: string } | null } }) => {
+    setDeviceBackupAvailable(hasDeviceBackupData());
+    void supabase.auth.getUser().then(
+      (res: {
+        data: {
+          user: {
+            id?: string;
+            email?: string;
+            app_metadata?: Record<string, unknown>;
+          } | null;
+        };
+      }) => {
         setEmail(res.data.user?.email ?? "");
-      });
-  }, []);
+        const provider = res.data.user?.app_metadata?.["provider"];
+        if (typeof provider === "string" && provider) {
+          setAuthProvider(provider);
+        } else if (isDemo) {
+          setAuthProvider("demo");
+        }
+      },
+    );
+  }, [isDemo]);
+
+  const isPasswordAccount = !isDemo && authProvider === "password";
 
   const submit = () => {
     const name = transportName.trim();
@@ -371,6 +393,32 @@ function SettingsPage() {
     }
   };
 
+  const importDeviceDataToCloud = async () => {
+    const snapshot = getDeviceBackupSnapshot();
+    if (!snapshot || (snapshot.vehicles.length === 0 && snapshot.trips.length === 0)) {
+      toast.info("No saved Device Mode records found on this browser.");
+      return;
+    }
+    setBackupBusy(true);
+    try {
+      await runSyncPayload(
+        {
+          vehicles: snapshot.vehicles as unknown as Array<Record<string, unknown>>,
+          trips: snapshot.trips as unknown as Array<Record<string, unknown>>,
+          ...(snapshot.settings
+            ? { settings: snapshot.settings as unknown as Record<string, unknown> }
+            : {}),
+        },
+        "Your saved Device Mode records are already in your Cloud account.",
+      );
+      setDeviceBackupAvailable(hasDeviceBackupData());
+    } catch {
+      toast.error("Could not import Device Mode data to Cloud.");
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
   return (
     <AppShell showAddTrip={false}>
       <div className="mx-auto max-w-5xl space-y-4">
@@ -589,64 +637,95 @@ function SettingsPage() {
               <span className="grid h-6 w-6 place-items-center rounded-lg bg-cyan-500/15 text-cyan-400 text-xs font-black">
                 3
               </span>
-              Account Security
+              Account &amp; Storage
             </h3>
             <div className="space-y-3.5">
-              {[
-                {
-                  id: "currentPassword",
-                  label: "Current Password",
-                  value: currentPassword,
-                  setter: setCurrentPassword,
-                },
-                {
-                  id: "newPassword",
-                  label: "New Password",
-                  value: newPassword,
-                  setter: setNewPassword,
-                },
-                {
-                  id: "confirmNewPassword",
-                  label: "Confirm New Password",
-                  value: confirmNewPassword,
-                  setter: setConfirmNewPassword,
-                },
-              ].map(({ id, label, value, setter }) => (
-                <div key={id} className="space-y-1.5">
-                  <Label
-                    htmlFor={id}
-                    className="text-xs font-semibold text-slate-400 uppercase tracking-wider"
-                  >
-                    {label}
-                  </Label>
-                  <div className="relative">
-                    <Input
-                      id={id}
-                      type={showPasswords ? "text" : "password"}
-                      value={value}
-                      onChange={(e) => setter(e.target.value)}
-                      className="h-11 rounded-xl bg-[#080D18] border-[#1C2B44] text-sm text-white pr-10"
-                    />
-                    <button
-                      type="button"
-                      aria-label={showPasswords ? "Hide password" : "Show password"}
-                      onClick={() => setShowPasswords((shown) => !shown)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-slate-400 transition-colors hover:text-white"
-                    >
-                      {showPasswords ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
-                  </div>
-                </div>
-              ))}
-              <div className="grid gap-2 pt-3">
-                <Button
-                  onClick={changePassword}
-                  disabled={passwordBusy || save.isPending}
-                  className="h-11 w-full rounded-xl font-bold bg-[#172844] hover:bg-[#1f355a] text-white border border-[#1C2B44]"
+              <div className="rounded-xl border border-[#1C2B44] bg-[#080D18] p-3.5 flex items-start gap-3">
+                <div
+                  className={
+                    isDemo
+                      ? "grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-amber-500/15 text-amber-300"
+                      : "grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-emerald-500/15 text-emerald-400"
+                  }
                 >
-                  {passwordBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                  Update Password
-                </Button>
+                  {isDemo ? <HardDrive className="h-4 w-4" /> : <Cloud className="h-4 w-4" />}
+                </div>
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-white">
+                    {isDemo ? "Device Storage Mode" : "Cloud Sync Active"}
+                  </p>
+                  <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
+                    {isDemo
+                      ? "Your vehicles, trips, and settings stay saved in this browser across reloads and sign-outs."
+                      : `Signed in via ${authProvider === "google.com" ? "Google" : "Email"} (${email || "verified account"}). All data backs up to Cloud Firestore automatically.`}
+                  </p>
+                </div>
+              </div>
+
+              {isPasswordAccount ? (
+                <>
+                  {[
+                    {
+                      id: "currentPassword",
+                      label: "Current Password",
+                      value: currentPassword,
+                      setter: setCurrentPassword,
+                    },
+                    {
+                      id: "newPassword",
+                      label: "New Password",
+                      value: newPassword,
+                      setter: setNewPassword,
+                    },
+                    {
+                      id: "confirmNewPassword",
+                      label: "Confirm New Password",
+                      value: confirmNewPassword,
+                      setter: setConfirmNewPassword,
+                    },
+                  ].map(({ id, label, value, setter }) => (
+                    <div key={id} className="space-y-1.5">
+                      <Label
+                        htmlFor={id}
+                        className="text-xs font-semibold text-slate-400 uppercase tracking-wider"
+                      >
+                        {label}
+                      </Label>
+                      <div className="relative">
+                        <Input
+                          id={id}
+                          type={showPasswords ? "text" : "password"}
+                          value={value}
+                          onChange={(e) => setter(e.target.value)}
+                          className="h-11 rounded-xl bg-[#080D18] border-[#1C2B44] text-sm text-white pr-10"
+                        />
+                        <button
+                          type="button"
+                          aria-label={showPasswords ? "Hide password" : "Show password"}
+                          onClick={() => setShowPasswords((shown) => !shown)}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-slate-400 transition-colors hover:text-white"
+                        >
+                          {showPasswords ? (
+                            <EyeOff className="h-4 w-4" />
+                          ) : (
+                            <Eye className="h-4 w-4" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  <Button
+                    onClick={changePassword}
+                    disabled={passwordBusy || save.isPending}
+                    className="h-11 w-full rounded-xl font-bold bg-[#172844] hover:bg-[#1f355a] text-white border border-[#1C2B44]"
+                  >
+                    {passwordBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                    Update Password
+                  </Button>
+                </>
+              ) : null}
+
+              <div className="pt-1">
                 <Button
                   variant="outline"
                   onClick={logout}
@@ -663,11 +742,11 @@ function SettingsPage() {
               <span className="grid h-6 w-6 place-items-center rounded-lg bg-cyan-500/15 text-cyan-400 text-xs font-black">
                 4
               </span>
-              Data Backup & Recovery
+              Data Backup &amp; Recovery
             </h3>
             <p className="mb-4 text-xs text-slate-400">
               Download a JSON backup of your vehicles, trips, and profile, restore from a previous
-              backup file, or check this browser for older un-synced local records.
+              backup file, or move saved browser data into your Cloud account.
             </p>
             <input
               ref={restoreInputRef}
@@ -677,6 +756,21 @@ function SettingsPage() {
               className="hidden"
             />
             <div className="flex flex-wrap gap-3">
+              {!isDemo && deviceBackupAvailable ? (
+                <Button
+                  type="button"
+                  disabled={backupBusy}
+                  onClick={importDeviceDataToCloud}
+                  className="h-11 rounded-xl font-bold bg-cyan-500 text-slate-950 hover:bg-cyan-400"
+                >
+                  {backupBusy ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <CloudUpload className="mr-2 h-4 w-4" />
+                  )}
+                  Import Saved Device Data to Cloud
+                </Button>
+              ) : null}
               <Button
                 type="button"
                 variant="outline"

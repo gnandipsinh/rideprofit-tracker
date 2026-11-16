@@ -5,18 +5,14 @@ import {
   LayoutDashboard,
   Truck,
   Route as RouteIcon,
-  Receipt,
   FileText,
-  TrendingUp,
   Settings as SettingsIcon,
   PlugZap,
   X,
   LogOut,
   Menu,
-  Bell,
-  User,
-  ShieldCheck,
-  ChevronDown,
+  HardDrive,
+  Cloud,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PWAInstallButton } from "@/components/PWAInstallButton";
@@ -29,16 +25,13 @@ interface NavItem {
   to: string;
   label: string;
   icon: typeof LayoutDashboard;
-  matchPrefix?: boolean;
 }
 
 const SIDEBAR_NAV: NavItem[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/vehicles", label: "Vehicles", icon: Truck },
   { to: "/trips", label: "Trips", icon: RouteIcon },
-  { to: "/trips?tab=expenses", label: "Expenses", icon: Receipt },
   { to: "/reports", label: "Reports", icon: FileText },
-  { to: "/reports?tab=profit", label: "Profit", icon: TrendingUp },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
 ];
 
@@ -57,7 +50,7 @@ export function AppShell({
   children: ReactNode;
   showAddTrip?: boolean;
 }) {
-  const { appName, userName, isDemo, settings } = useApp();
+  const { userName, isDemo, settings } = useApp();
   const health = useHealth();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const searchStr = useRouterState({ select: (s) => s.location.searchStr });
@@ -116,19 +109,8 @@ export function AppShell({
   const { title, subtitle } = getPageHeader();
 
   const isNavActive = (item: NavItem) => {
-    if (item.to.includes("?")) {
-      const [path, query] = item.to.split("?");
-      return Boolean(query && pathname === path && searchStr?.includes(query));
-    }
     if (item.to === "/") {
       return pathname === "/";
-    }
-    // Don't mark trips active if we're on expenses tab
-    if (item.to === "/trips" && searchStr?.includes("tab=expenses")) {
-      return false;
-    }
-    if (item.to === "/reports" && searchStr?.includes("tab=profit")) {
-      return false;
     }
     return pathname.startsWith(item.to);
   };
@@ -178,24 +160,29 @@ export function AppShell({
           })}
         </nav>
 
-        {/* Fleet Promo Card at bottom of sidebar */}
+        {/* Storage Mode Indicator at bottom of sidebar */}
         <div className="p-4 border-t border-[#162238]">
-          <div className="rounded-2xl border border-cyan-500/25 bg-gradient-to-b from-[#10192A] to-[#0D1524] p-3.5 relative overflow-hidden">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="grid h-6 w-6 place-items-center rounded-lg bg-cyan-500/20 text-cyan-400">
-                <ShieldCheck className="h-3.5 w-3.5" />
-              </span>
-              <span className="text-[0.68rem] font-bold uppercase tracking-wider text-cyan-400">
-                Fleet Pro
-              </span>
+          <Link
+            to="/settings"
+            className="flex items-center gap-2.5 rounded-xl border border-[#1C2B44] bg-[#10192A] px-3.5 py-2.5 hover:border-cyan-500/40 transition-colors"
+          >
+            <span
+              className={cn(
+                "grid h-7 w-7 shrink-0 place-items-center rounded-lg",
+                isDemo ? "bg-amber-500/15 text-amber-300" : "bg-emerald-500/15 text-emerald-400",
+              )}
+            >
+              {isDemo ? <HardDrive className="h-3.5 w-3.5" /> : <Cloud className="h-3.5 w-3.5" />}
+            </span>
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-white leading-tight">
+                {isDemo ? "Device Storage" : "Cloud Sync"}
+              </p>
+              <p className="text-[0.68rem] text-slate-400 truncate">
+                {isDemo ? "Saved in this browser" : "Backed up to your account"}
+              </p>
             </div>
-            <p className="text-xs font-bold text-white leading-snug">
-              Manage Your Fleet More Efficiently
-            </p>
-            <p className="text-[0.7rem] text-slate-400 mt-1">
-              Live profit margins, automated WhatsApp summaries & PDF statements.
-            </p>
-          </div>
+          </Link>
         </div>
       </aside>
 
@@ -211,29 +198,36 @@ export function AppShell({
           <div className="flex items-center gap-3">
             <PWAInstallButton />
 
-            {/* Notification button */}
-            <div
-              className="grid h-10 w-10 place-items-center rounded-xl border border-[#1C2B44] bg-[#10192A] text-slate-400 hover:text-white hover:border-cyan-500/40 transition-colors cursor-pointer"
-              title="Notifications"
+            {/* Storage status pill */}
+            <Link
+              to="/settings"
+              className={cn(
+                "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-semibold transition-colors",
+                isDemo
+                  ? "border-amber-500/30 bg-amber-500/10 text-amber-300 hover:bg-amber-500/15"
+                  : "border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/15",
+              )}
+              title={isDemo ? "Data saved on this device" : "Data synced to Cloud Firestore"}
             >
-              <Bell className="h-4 w-4" />
-            </div>
+              {isDemo ? <HardDrive className="h-3.5 w-3.5" /> : <Cloud className="h-3.5 w-3.5" />}
+              <span>{isDemo ? "Device Storage" : "Cloud Sync"}</span>
+            </Link>
 
-            {/* User Profile Pill - Links to Settings */}
+            {/* User Profile Link */}
             <Link
               to="/settings"
               className="flex items-center gap-2.5 px-3 py-1.5 rounded-xl border border-[#1C2B44] bg-[#10192A] hover:border-cyan-500/40 hover:bg-[#132137] transition-all group"
               title="Profile & Settings"
             >
               <div className="grid h-8 w-8 place-items-center rounded-lg bg-cyan-500/15 text-cyan-400 font-bold text-xs ring-1 ring-cyan-500/20 group-hover:ring-cyan-500/40 transition-all">
-                {(userName || "Fleet Operator").charAt(0).toUpperCase()}
+                {(userName || "Operator").charAt(0).toUpperCase()}
               </div>
               <div className="text-left">
                 <p className="text-xs font-bold text-white leading-tight truncate max-w-[140px] group-hover:text-cyan-300 transition-colors">
-                  {userName || (isDemo ? "Demo Operator" : "Fleet Operator")}
+                  {userName || (isDemo ? "Device User" : "Fleet Operator")}
                 </p>
                 <p className="text-[0.65rem] text-cyan-400/90 font-semibold tracking-wide">
-                  {isDemo ? "Demo Mode" : settings?.userRole || "Super Admin"}
+                  {isDemo ? "Saved Locally" : settings?.userRole || "Super Admin"}
                 </p>
               </div>
             </Link>
@@ -278,6 +272,18 @@ export function AppShell({
           </div>
 
           <div className="flex items-center gap-1.5">
+            <Link
+              to="/settings"
+              className={cn(
+                "inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-[0.65rem] font-semibold",
+                isDemo
+                  ? "border-amber-500/30 bg-amber-500/10 text-amber-300"
+                  : "border-emerald-500/30 bg-emerald-500/10 text-emerald-300",
+              )}
+            >
+              {isDemo ? <HardDrive className="h-3 w-3" /> : <Cloud className="h-3 w-3" />}
+              <span>{isDemo ? "Device" : "Cloud"}</span>
+            </Link>
             <PWAInstallButton />
             <button
               type="button"
@@ -358,14 +364,14 @@ export function AppShell({
               className="flex items-center gap-3 p-3 my-3 rounded-xl border border-[#1C2B44] bg-[#10192A] hover:border-cyan-500/40 transition-colors"
             >
               <div className="grid h-9 w-9 place-items-center rounded-lg bg-cyan-500/20 text-cyan-400 font-bold text-sm">
-                {(userName || "Fleet Operator").charAt(0).toUpperCase()}
+                {(userName || "Operator").charAt(0).toUpperCase()}
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-bold text-white truncate">
-                  {userName || (isDemo ? "Demo Operator" : "Fleet Operator")}
+                  {userName || (isDemo ? "Device User" : "Fleet Operator")}
                 </p>
                 <p className="text-[0.68rem] text-cyan-400 font-semibold">
-                  {isDemo ? "Demo Mode" : settings?.userRole || "Super Admin"}
+                  {isDemo ? "Device Storage" : settings?.userRole || "Cloud Sync"}
                 </p>
               </div>
             </Link>
@@ -395,11 +401,6 @@ export function AppShell({
             </nav>
 
             <div className="pt-4 border-t border-[#162238] space-y-3">
-              <div className="rounded-xl border border-cyan-500/20 bg-[#10192A] p-3">
-                <p className="text-xs font-bold text-white">Manage Your Fleet More Efficiently</p>
-                <p className="text-[0.68rem] text-slate-400 mt-1">RideProfit Transport System</p>
-              </div>
-
               <Button
                 type="button"
                 variant="destructive"

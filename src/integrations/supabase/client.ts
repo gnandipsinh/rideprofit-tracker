@@ -277,9 +277,9 @@ function mapFirebaseAuthError(err: unknown, fallback: string): AuthError {
     };
   }
   if (code === "auth/unauthorized-domain") {
+    const host = typeof window !== "undefined" ? window.location.hostname : "this domain";
     return {
-      message:
-        "This app domain is not yet authorized in Firebase Authentication → Settings → Authorized domains.",
+      message: `Domain "${host}" is not authorized for Google Sign-In yet. Add "${host}" under Firebase Authentication → Settings → Authorized domains, or use Device Mode below.`,
       status: 400,
     };
   }

@@ -10,10 +10,6 @@ import {
   Search,
   Trash2,
   Truck,
-  CheckCircle2,
-  XCircle,
-  Clock,
-  Sparkles,
 } from "lucide-react";
 import { AppShell } from "@/components/AppShell";
 import { EmptyState } from "@/components/EmptyState";
@@ -314,16 +310,10 @@ function VehiclesPage() {
                           : "border-[#1C2B44] bg-[#10192A] hover:border-cyan-500/40 hover:bg-[#132137]",
                       )}
                     >
-                      {/* Left: Truck thumbnail image / icon */}
+                      {/* Left: Clean Truck Icon Badge */}
                       <div className="flex items-center gap-3.5 min-w-0">
-                        <div className="relative h-14 w-16 sm:h-16 sm:w-20 shrink-0 rounded-xl overflow-hidden border border-[#1C2B44] bg-[#080D18] flex items-center justify-center">
-                          <img
-                            src="/assets/landing/hero-truck.png"
-                            alt="Truck thumbnail"
-                            className="h-full w-full object-cover opacity-90 transition-transform duration-200 hover:scale-105"
-                            referrerPolicy="no-referrer"
-                          />
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent pointer-events-none" />
+                        <div className="grid h-12 w-12 shrink-0 place-items-center rounded-xl border border-cyan-500/25 bg-cyan-500/10 text-cyan-400">
+                          <Truck className="h-5 w-5" />
                         </div>
 
                         {/* Middle: Details */}
